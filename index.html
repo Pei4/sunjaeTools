@@ -1,0 +1,1015 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>進項扣抵小工具</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState } = React;
+
+        // Lucide React Icons (simplified inline versions)
+        const Upload = () => (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7,10 12,15 17,10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+        );
+
+        const FileText = () => (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2Z"/>
+                <polyline points="14,2 14,8 20,8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+                <polyline points="10,9 9,9 8,9"/>
+            </svg>
+        );
+
+        const CheckCircle = () => (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                <polyline points="22,4 12,14.01 9,11.01"/>
+            </svg>
+        );
+
+        const XCircle = () => (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="15" y1="9" x2="9" y2="15"/>
+                <line x1="9" y1="9" x2="15" y2="15"/>
+            </svg>
+        );
+
+        const Save = () => (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                <polyline points="17,21 17,13 7,13 7,21"/>
+                <polyline points="7,3 7,8 15,8"/>
+            </svg>
+        );
+
+        const Database = () => (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <ellipse cx="12" cy="5" rx="9" ry="3"/>
+                <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+                <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+            </svg>
+        );
+
+        const AlertCircle = () => (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+        );
+
+        function InvoiceReviewSystem() {
+            const [step, setStep] = useState(1);
+            const [companyId, setCompanyId] = useState('');
+            const [uploadedFile, setUploadedFile] = useState(null);
+            const [invoiceData, setInvoiceData] = useState([]);
+            const [invoiceDetailsData, setInvoiceDetailsData] = useState([]);
+            const [originalInvoiceData, setOriginalInvoiceData] = useState([]);
+            const [originalDetailsData, setOriginalDetailsData] = useState([]);
+            const [refData, setRefData] = useState([]);
+            const [pendingReviews, setPendingReviews] = useState([]);
+            const [currentReviewIndex, setCurrentReviewIndex] = useState(0);
+            const [newKeyword, setNewKeyword] = useState('');
+            const [isProcessing, setIsProcessing] = useState(false);
+            const [progress, setProgress] = useState(0);
+            const [showEditModal, setShowEditModal] = useState(false);
+            const [editingInvoice, setEditingInvoice] = useState(null);
+            const [error, setError] = useState('');
+
+            // n8n API 配置
+            const N8N_BASE = "https://pei4.zeabur.app";
+            const N8N_KEY = "esr4dfg8651szdg21vzs3d";
+
+            // n8n API 函式
+            async function fetchRefDataFromN8n(customerId) {
+                const url = `${N8N_BASE}/webhook/get-ref-data?customerId=${encodeURIComponent(customerId)}`;
+                console.log('正在呼叫 n8n API:', url);
+                console.log('使用的 customerId:', customerId);
+                
+                const res = await fetch(url, { 
+                    headers: { 
+                        "X-API-Key": N8N_KEY,
+                        "Content-Type": "application/json"
+                    } 
+                });
+                
+                console.log('n8n API 響應狀態:', res.status);
+                
+                if (!res.ok) {
+                    const errorText = await res.text();
+                    console.error('n8n API 錯誤響應:', errorText);
+                    throw new Error(`n8n 讀取失敗 ${res.status}: ${errorText}`);
+                }
+                
+                const data = await res.json();
+                console.log('n8n API 回傳資料:', data);
+                
+                return data;
+            }
+
+            async function addRefRuleToN8n(rule) {
+                const url = `${N8N_BASE}/webhook/add-ref-data`;
+                console.log('寫入 n8n API:', url, rule);
+                
+                const res = await fetch(url, {
+                    method: "POST",
+                    headers: { 
+                        "Content-Type": "application/json", 
+                        "X-API-Key": N8N_KEY 
+                    },
+                    body: JSON.stringify(rule)
+                });
+                
+                console.log('n8n 寫入 API 響應狀態:', res.status);
+                
+                if (!res.ok) {
+                    const errorText = await res.text();
+                    console.error('n8n 寫入 API 錯誤響應:', errorText);
+                    throw new Error(`n8n 寫入失敗 ${res.status}: ${errorText}`);
+                }
+                
+                const data = await res.json();
+                console.log('n8n 寫入 API 回傳:', data);
+                
+                return data;
+            }
+
+            const useFallbackData = () => {
+                console.log('使用測試資料繼續流程');
+                // 使用測試資料
+                const fallbackRefData = [
+                    { customerId: '87097348', deductable: 'Yes', sellerId: '27365925', keyword: '面膜' },
+                    { customerId: '87097348', deductable: 'Yes', sellerId: '27365925', keyword: '防曬' },
+                    { customerId: '28152246', deductable: 'No', sellerId: '28152246', keyword: '' },
+                    { customerId: '28152246', deductable: 'No', sellerId: '', keyword: '餐飲' },
+                    { customerId: '28152246', deductable: 'No', sellerId: '', keyword: '料理' },
+                    { customerId: '28152246', deductable: 'Yes', sellerId: '13750574', keyword: '運什費' },
+                    { customerId: '28152246', deductable: 'Yes', sellerId: '52003801', keyword: '' },
+                    { customerId: '28152246', deductable: 'Yes', sellerId: '05386910', keyword: '' },
+                ];
+                
+                // 根據客戶統編篩選
+                const filteredRefData = fallbackRefData.filter(ref => ref.customerId === companyId);
+                
+                setError('');
+                setRefData(filteredRefData);
+                setStep(3);
+                
+                setTimeout(() => {
+                    initialDataCleaning(filteredRefData);
+                }, 100);
+            };
+
+            const calculateSimilarity = (str1, str2) => {
+                const longer = str1.length > str2.length ? str1 : str2;
+                const shorter = str1.length > str2.length ? str2 : str1;
+                if (longer.length === 0) return 1.0;
+                
+                let editDistance = 0;
+                const matrix = Array(shorter.length + 1).fill().map(() => Array(longer.length + 1).fill(0));
+                
+                for (let i = 0; i <= shorter.length; i++) matrix[i][0] = i;
+                for (let j = 0; j <= longer.length; j++) matrix[0][j] = j;
+                
+                for (let i = 1; i <= shorter.length; i++) {
+                    for (let j = 1; j <= longer.length; j++) {
+                        if (shorter[i-1] === longer[j-1]) {
+                            matrix[i][j] = matrix[i-1][j-1];
+                        } else {
+                            matrix[i][j] = Math.min(matrix[i-1][j-1], matrix[i][j-1], matrix[i-1][j]) + 1;
+                        }
+                    }
+                }
+                
+                editDistance = matrix[shorter.length][longer.length];
+                return (longer.length - editDistance) / longer.length;
+            };
+
+            const consolidateItems = (items) => {
+                if (!items || items.length === 0) return [];
+                
+                const consolidated = [];
+                const used = new Set();
+                
+                for (let i = 0; i < items.length; i++) {
+                    if (used.has(i)) continue;
+                    
+                    const currentItem = items[i];
+                    const similarItems = [currentItem];
+                    used.add(i);
+                    
+                    for (let j = i + 1; j < items.length; j++) {
+                        if (used.has(j)) continue;
+                        
+                        if (calculateSimilarity(currentItem, items[j]) >= 0.8) {
+                            similarItems.push(items[j]);
+                            used.add(j);
+                        }
+                    }
+                    
+                    if (similarItems.length > 1) {
+                        const shortest = similarItems.reduce((a, b) => a.length < b.length ? a : b);
+                        consolidated.push(shortest + ' (' + similarItems.length + '項)');
+                    } else {
+                        consolidated.push(currentItem);
+                    }
+                }
+                
+                return consolidated;
+            };
+
+            const handleFileUpload = async (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                if (!file.name.endsWith('.xlsx')) {
+                    setError('請上傳 Excel 檔案（.xlsx格式）');
+                    return;
+                }
+
+                setError('');
+                setUploadedFile(file);
+                
+                // 從檔名提取公司統編（前8碼）
+                const extractedCompanyId = file.name.substring(0, 8);
+                console.log('檔案名稱:', file.name);
+                console.log('提取的公司統編:', extractedCompanyId);
+                
+                setCompanyId(extractedCompanyId);
+
+                try {
+                    const invoiceSheetData = await readExcelSheet(file, 'Invoice');
+                    const detailsSheetData = await readExcelSheet(file, 'Invoice_details');
+                    
+                    if (!invoiceSheetData || !detailsSheetData) {
+                        setError('無法讀取工作表，請確認檔案包含 Invoice 和 Invoice_details 工作表');
+                        return;
+                    }
+
+                    setOriginalInvoiceData(invoiceSheetData);
+                    setOriginalDetailsData(detailsSheetData);
+                    
+                    setInvoiceData(invoiceSheetData);
+                    setInvoiceDetailsData(detailsSheetData);
+                    
+                    // 檔案上傳成功後自動進入載入參考資料步驟
+                    setStep(2);
+                    
+                    // 自動觸發載入參考資料，直接傳遞 extractedCompanyId
+                    setTimeout(() => {
+                        searchRefDataWithId(extractedCompanyId);
+                    }, 500);
+                    
+                } catch (err) {
+                    setError('檔案讀取失敗：' + err.message);
+                }
+            };
+
+            const readExcelSheet = async (file, sheetName) => {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = async (e) => {
+                        try {
+                            const data = new Uint8Array(e.target.result);
+                            const workbook = XLSX.read(data, { type: 'array' });
+                            
+                            if (!workbook.SheetNames.includes(sheetName)) {
+                                reject(new Error('找不到工作表: ' + sheetName));
+                                return;
+                            }
+
+                            const worksheet = workbook.Sheets[sheetName];
+                            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                            
+                            if (jsonData.length < 2) {
+                                reject(new Error('工作表 ' + sheetName + ' 資料不足'));
+                                return;
+                            }
+
+                            const headers = jsonData[0];
+                            const rows = jsonData.slice(1);
+                            
+                            if (sheetName === 'Invoice') {
+                                const processedData = rows.map((row, index) => ({
+                                    invoiceNumber: row[0] || '',
+                                    buyerNote: row[1] || '',
+                                    sellerId: String(row[7] || ''),
+                                    sellerName: row[8] || '',
+                                    originalRow: row,
+                                    rowIndex: index + 2
+                                })).filter(item => item.invoiceNumber);
+                                
+                                resolve(processedData);
+                                
+                            } else if (sheetName === 'Invoice_details') {
+                                const processedData = rows.map((row, index) => ({
+                                    invoiceNumber: row[0] || '',
+                                    itemName: row[3] || '',
+                                    originalRow: row,
+                                    rowIndex: index + 2
+                                })).filter(item => {
+                                    const hasInvoice = item.invoiceNumber && String(item.invoiceNumber).trim() !== '';
+                                    const hasItem = item.itemName && String(item.itemName).trim() !== '';
+                                    return hasInvoice && hasItem;
+                                });
+                                
+                                resolve(processedData);
+                            }
+                            
+                        } catch (error) {
+                            console.error('讀取工作表錯誤:', error);
+                            reject(error);
+                        }
+                    };
+                    reader.onerror = () => reject(new Error('檔案讀取失敗'));
+                    reader.readAsArrayBuffer(file);
+                });
+            };
+
+            const searchRefData = async () => {
+                return searchRefDataWithId(companyId);
+            };
+
+            const searchRefDataWithId = async (customerId) => {
+                try {
+                    setError('');
+                    setIsProcessing(true);
+                    setProgress(50);
+                    
+                    console.log('開始載入參考資料，customerId:', customerId);
+                    
+                    if (!customerId || customerId.trim() === '') {
+                        throw new Error('客戶統編為空，請確認檔案命名格式正確');
+                    }
+                    
+                    const n8nData = await fetchRefDataFromN8n(customerId);
+                    setRefData(n8nData);
+                    
+                    setProgress(100);
+                    setIsProcessing(false);
+                    setStep(3);
+                    
+                    setTimeout(() => {
+                        initialDataCleaning(n8nData);
+                    }, 100);
+                } catch (e) {
+                    console.error('載入參考資料失敗:', e);
+                    setError(`載入參考資料失敗：${e.message}，將使用測試資料繼續`);
+                    setIsProcessing(false);
+                    
+                    // 自動使用測試資料
+                    setTimeout(() => {
+                        useFallbackData();
+                    }, 2000);
+                }
+            };
+
+            const initialDataCleaning = (currentRefData = refData) => {
+                console.log('開始清理，使用的參考資料:', currentRefData);
+
+                setIsProcessing(true);
+                setProgress(0);
+
+                const interval = setInterval(() => {
+                    setProgress(prev => {
+                        if (prev >= 100) {
+                            clearInterval(interval);
+                            setIsProcessing(false);
+                            
+                            const cleanedData = invoiceData.map(invoice => {
+                                const invoiceSellerId = String(invoice.sellerId).trim();
+                                
+                                const invoiceItems = invoiceDetailsData.filter(detail => {
+                                    const exactMatch = detail.invoiceNumber === invoice.invoiceNumber;
+                                    const stringMatch = String(detail.invoiceNumber).trim() === String(invoice.invoiceNumber).trim();
+                                    
+                                    return exactMatch || stringMatch;
+                                }).map(detail => detail.itemName).filter(item => item && item.trim() !== '');
+                                
+                                // 步驟1：檢查可扣抵項目（deductable: 'Yes'）
+                                const deductibleRefs = currentRefData.filter(ref => ref.deductable === 'Yes');
+                                const hasDeductibleMatch = deductibleRefs.some(ref => {
+                                    const refSellerId = String(ref.sellerId).trim();
+                                    const hasSellerMatch = refSellerId && refSellerId === invoiceSellerId;
+                                    const hasKeywordMatch = ref.keyword && invoiceItems.some(item => item.includes(ref.keyword));
+                                    
+                                    // 如果同時有賣方統編和關鍵字，兩者都要符合
+                                    if (refSellerId && ref.keyword) {
+                                        const bothMatch = hasSellerMatch && hasKeywordMatch;
+                                        if (bothMatch) {
+                                            console.log(`發票 ${invoice.invoiceNumber}: 可扣抵匹配 - 賣方 ${invoiceSellerId} 且包含關鍵字 "${ref.keyword}"`);
+                                        }
+                                        return bothMatch;
+                                    }
+                                    // 如果只有賣方統編，只要賣方統編符合
+                                    else if (refSellerId && !ref.keyword) {
+                                        if (hasSellerMatch) {
+                                            console.log(`發票 ${invoice.invoiceNumber}: 可扣抵匹配 - 賣方 ${invoiceSellerId}`);
+                                        }
+                                        return hasSellerMatch;
+                                    }
+                                    // 如果只有關鍵字，只要關鍵字符合
+                                    else if (!refSellerId && ref.keyword) {
+                                        if (hasKeywordMatch) {
+                                            console.log(`發票 ${invoice.invoiceNumber}: 可扣抵匹配 - 包含關鍵字 "${ref.keyword}"`);
+                                        }
+                                        return hasKeywordMatch;
+                                    }
+                                    
+                                    return false;
+                                });
+
+                                // 步驟2：檢查不可扣抵項目（deductable: 'No'）
+                                const nonDeductibleRefs = currentRefData.filter(ref => ref.deductable === 'No');
+                                const hasNonDeductibleMatch = nonDeductibleRefs.some(ref => {
+                                    // 條件1：發票統編與賣方統編相符
+                                    if (ref.sellerId && String(ref.sellerId).trim() === invoiceSellerId) {
+                                        console.log(`發票 ${invoice.invoiceNumber}: 不可扣抵匹配 - 賣方統編相符 ${invoiceSellerId}`);
+                                        return true;
+                                    }
+                                    
+                                    // 條件2：任一發票明細包含品名關鍵字
+                                    if (ref.keyword && invoiceItems.some(item => item.includes(ref.keyword))) {
+                                        console.log(`發票 ${invoice.invoiceNumber}: 不可扣抵匹配 - 包含關鍵字 "${ref.keyword}"`);
+                                        return true;
+                                    }
+                                    
+                                    return false;
+                                });
+
+                                let buyerNote = '待查';
+                                if (hasDeductibleMatch) {
+                                    buyerNote = '';  // 可扣抵
+                                } else if (hasNonDeductibleMatch) {
+                                    buyerNote = '不得抵扣之進貨及費用';  // 不可扣抵
+                                }
+
+                                console.log(`發票 ${invoice.invoiceNumber}: ${buyerNote === '' ? '可扣抵' : buyerNote === '不得抵扣之進貨及費用' ? '不可扣抵' : '待查'}`);
+
+                                return {
+                                    ...invoice,
+                                    buyerNote: buyerNote,
+                                    items: invoiceItems,
+                                    consolidatedItems: consolidateItems(invoiceItems)
+                                };
+                            });
+
+                            setInvoiceData(cleanedData);
+                            const pending = cleanedData.filter(invoice => invoice.buyerNote === '待查');
+                            console.log(`處理完成，待審核: ${pending.length} 筆，可扣抵: ${cleanedData.filter(i => i.buyerNote === '').length} 筆，不可扣抵: ${cleanedData.filter(i => i.buyerNote === '不得抵扣之進貨及費用').length} 筆`);
+                            setPendingReviews(pending);
+                            setStep(pending.length > 0 ? 4 : 5);
+                            
+                            return 100;
+                        }
+                        return prev + 10;
+                    });
+                }, 200);
+            };
+
+            const handleReviewDecision = async (decision) => {
+                const currentInvoice = pendingReviews[currentReviewIndex];
+                
+                const updatedData = invoiceData.map(invoice => 
+                    invoice.invoiceNumber === currentInvoice.invoiceNumber 
+                        ? { ...invoice, buyerNote: decision === 'deductible' ? '' : '不得抵扣之進貨及費用' }
+                        : invoice
+                );
+                
+                setInvoiceData(updatedData);
+                
+                // 處理新關鍵字並同步到 n8n
+                if (decision === 'deductible' && newKeyword.trim()) {
+                    const keywords = newKeyword.split(',').map(k => k.trim()).filter(Boolean);
+                    const newRefs = keywords.map(keyword => ({
+                        customerId: companyId,
+                        deductable: 'Yes',
+                        sellerId: currentInvoice.sellerId,
+                        keyword
+                    }));
+                    
+                    setRefData(prev => [...prev, ...newRefs]);
+                    
+                    // 背景寫入 n8n（不 await，避免卡 UI）
+                    newRefs.forEach(rule => addRefRuleToN8n(rule).catch(console.error));
+                    
+                    setNewKeyword('');
+                }
+
+                if (currentReviewIndex < pendingReviews.length - 1) {
+                    setCurrentReviewIndex(prev => prev + 1);
+                } else {
+                    setStep(5);
+                }
+            };
+
+            const openEditModal = (invoice) => {
+                setEditingInvoice(invoice);
+                setNewKeyword('');
+                setShowEditModal(true);
+            };
+
+            const closeEditModal = () => {
+                setShowEditModal(false);
+                setEditingInvoice(null);
+                setNewKeyword('');
+            };
+
+            const handleEditDecision = async (decision) => {
+                if (!editingInvoice) return;
+                
+                const updatedData = invoiceData.map(invoice => 
+                    invoice.invoiceNumber === editingInvoice.invoiceNumber 
+                        ? { ...invoice, buyerNote: decision === 'deductible' ? '' : '不得抵扣之進貨及費用' }
+                        : invoice
+                );
+                
+                setInvoiceData(updatedData);
+                
+                // 處理新關鍵字並同步到 n8n
+                if (decision === 'deductible' && newKeyword.trim()) {
+                    const keywords = newKeyword.split(',').map(k => k.trim()).filter(Boolean);
+                    const newRefs = keywords.map(keyword => ({
+                        customerId: companyId,
+                        deductable: 'Yes',
+                        sellerId: editingInvoice.sellerId,
+                        keyword
+                    }));
+                    
+                    setRefData(prev => [...prev, ...newRefs]);
+                    
+                    // 背景寫入 n8n（不 await，避免卡 UI）
+                    newRefs.forEach(rule => addRefRuleToN8n(rule).catch(console.error));
+                }
+                
+                closeEditModal();
+            };
+
+            const downloadResults = async () => {
+                try {
+                    const wb = XLSX.utils.book_new();
+
+                    const updatedInvoiceRows = originalInvoiceData.map(invoice => {
+                        const updated = invoiceData.find(inv => inv.invoiceNumber === invoice.invoiceNumber);
+                        if (updated) {
+                            const newRow = [...invoice.originalRow];
+                            newRow[1] = updated.buyerNote;
+                            return newRow;
+                        }
+                        return invoice.originalRow;
+                    });
+
+                    const invoiceHeaders = ["發票號碼","買受人註記","格式代號","發票狀態","發票日期","買方統一編號","買方名稱","賣方統一編號","賣方名稱","寄送日期","銷售額合計","應稅銷售額","零稅銷售額","免稅銷售額","營業稅","總計","課稅別","匯率","載具類別編號","載具號碼1","載具號碼2","總備註","開立確認時間","最後異動時間","MIG訊息類別","傳送方統編","傳送方名稱"];
+                    const invoiceSheetData = [invoiceHeaders, ...updatedInvoiceRows];
+                    const invoiceWS = XLSX.utils.aoa_to_sheet(invoiceSheetData);
+                    XLSX.utils.book_append_sheet(wb, invoiceWS, "Invoice");
+
+                    const detailsHeaders = ["發票號碼","發票日期","序號","品名","數量","單位","單價","金額","單一欄位備註","相關號碼"];
+                    const detailsRows = originalDetailsData.map(detail => detail.originalRow);
+                    const detailsSheetData = [detailsHeaders, ...detailsRows];
+                    const detailsWS = XLSX.utils.aoa_to_sheet(detailsSheetData);
+                    XLSX.utils.book_append_sheet(wb, detailsWS, "Invoice_details");
+
+                    const currentDate = new Date().toISOString().slice(0, 10);
+                    XLSX.writeFile(wb, companyId + '_處理結果_' + currentDate + '.xlsx');
+                    
+                } catch (error) {
+                    alert('下載失敗：' + error.message);
+                }
+            };
+
+            return React.createElement('div', { className: "min-h-screen bg-gray-50 py-4" }, [
+                React.createElement('style', { 
+                    key: 'style',
+                    dangerouslySetInnerHTML: {
+                        __html: `
+                            .work-container {
+                                width: 100%;
+                            }
+                            @media (min-width: 800px) {
+                                .work-container {
+                                    width: 70%;
+                                    margin: 0 auto;
+                                }
+                            }
+                        `
+                    }
+                }),
+                React.createElement('div', { key: 'container', className: "max-w-6xl mx-auto px-2" }, [
+                    // Progress bar
+                    React.createElement('div', { key: 'progress', className: "w-full bg-gray-200 h-1 mb-3" }, 
+                        React.createElement('div', { 
+                            className: "bg-blue-500 h-1 transition-all duration-300",
+                            style: { width: (step / 6) * 100 + '%' }
+                        })
+                    ),
+                    
+                    // Main container
+                    React.createElement('div', { 
+                        key: 'main',
+                        className: `bg-white rounded-xl shadow-md py-3 px-8 work-container ${step === 4 ? 'h-[60vh] flex flex-col' : ''}`
+                    }, [
+                        React.createElement('div', { 
+                            key: 'content',
+                            className: step === 4 ? "flex-1 overflow-y-auto" : "min-h-96" 
+                        }, [
+                            // Step 1: File upload
+                            step === 1 && React.createElement('div', { key: 'step1', className: "text-center" }, [
+                                React.createElement('div', { key: 'upload-icon', className: "w-12 h-12 mx-auto mb-3 text-blue-500" }, React.createElement(Upload)),
+                                React.createElement('h2', { key: 'title', className: "text-lg font-bold mb-3" }, "上傳發票檔案"),
+                                React.createElement('p', { key: 'desc', className: "text-sm text-gray-600 mb-4" }, "請上傳當期的 Excel 檔案（檔名前8碼為公司統編）"),
+                                
+                                React.createElement('div', { key: 'upload-area', className: "border-2 border-dashed border-gray-300 rounded-lg p-6 mb-3" }, [
+                                    React.createElement('input', { 
+                                        key: 'file-input',
+                                        type: "file",
+                                        accept: ".xlsx",
+                                        onChange: handleFileUpload,
+                                        className: "hidden",
+                                        id: "file-upload"
+                                    }),
+                                    React.createElement('label', { key: 'file-label', htmlFor: "file-upload", className: "cursor-pointer" }, 
+                                        React.createElement('div', { className: "text-center" }, [
+                                            React.createElement('div', { key: 'file-icon', className: "w-8 h-8 mx-auto mb-2 text-gray-400" }, React.createElement(FileText)),
+                                            React.createElement('p', { key: 'file-text', className: "text-sm text-gray-500" }, "點擊選擇檔案或拖曳檔案至此"),
+                                            React.createElement('p', { key: 'file-format', className: "text-xs text-gray-400 mt-2" }, "支援 .xlsx 格式")
+                                        ])
+                                    )
+                                ]),
+
+                                error && React.createElement('div', { key: 'error', className: "bg-red-50 border border-red-200 rounded-lg p-3 mb-3" }, 
+                                    React.createElement('div', { className: "flex items-center" }, [
+                                        React.createElement('div', { key: 'error-icon', className: "w-4 h-4 text-red-500 mr-2" }, React.createElement(AlertCircle)),
+                                        React.createElement('p', { key: 'error-text', className: "text-xs text-red-800" }, error)
+                                    ])
+                                ),
+
+                                uploadedFile && !error && React.createElement('div', { key: 'success', className: "bg-green-50 border border-green-200 rounded-lg p-3" }, [
+                                    React.createElement('p', { key: 'file-name', className: "text-xs text-green-800" }, React.createElement('strong', {}, "已上傳："), uploadedFile.name),
+                                    React.createElement('p', { key: 'company-id', className: "text-xs text-green-600" }, React.createElement('strong', {}, "公司統編："), companyId || '提取中...'),
+                                    React.createElement('p', { key: 'invoice-count', className: "text-xs text-green-600" }, React.createElement('strong', {}, "發票筆數："), invoiceData.length),
+                                    React.createElement('p', { key: 'detail-count', className: "text-xs text-green-600" }, React.createElement('strong', {}, "明細筆數："), invoiceDetailsData.length),
+                                    companyId && companyId.length < 8 && React.createElement('p', { key: 'warning', className: "text-xs text-orange-600 mt-1" }, "警告：檔名前8碼不足（", companyId.length, "碼），請確認檔名格式")
+                                ])
+                            ]),
+
+                            // Step 2: Loading reference data
+                            step === 2 && React.createElement('div', { key: 'step2', className: "text-center" }, [
+                                React.createElement('div', { key: 'db-icon', className: "w-12 h-12 mx-auto mb-3 text-blue-500" }, React.createElement(Database)),
+                                React.createElement('h2', { key: 'title', className: "text-lg font-bold mb-3" }, "正在載入參考資料"),
+                                React.createElement('p', { key: 'desc', className: "text-sm text-gray-600 mb-4" }, "系統正在從 n8n 載入客戶 ", companyId, " 的參考資料..."),
+                                
+                                React.createElement('div', { key: 'loading-info', className: "bg-blue-50 rounded-lg p-3 mb-4" }, [
+                                    React.createElement('div', { key: 'loading-icon', className: "flex items-center justify-center mb-2" }, [
+                                        React.createElement('div', { className: "animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500 mr-2" }),
+                                        React.createElement('p', { className: "text-xs text-blue-800" }, "連接 n8n 工作流程中...")
+                                    ]),
+                                    React.createElement('p', { key: 'api-info', className: "text-xs text-blue-600" }, "正在讀取客戶 ", companyId || '未知', " 的扣抵規則設定"),
+                                    React.createElement('div', { key: 'debug-info', className: "text-xs text-blue-500 mt-2 border-t border-blue-200 pt-2" }, [
+                                        React.createElement('p', {}, "API 地址: ", N8N_BASE, "/webhook/get-ref-data"),
+                                        React.createElement('p', {}, "客戶統編: ", companyId || '空值'),
+                                        React.createElement('p', {}, "如果載入失敗，請按 F12 開啟開發者工具查看 Console 詳細訊息")
+                                    ])
+                                ]),
+
+                                error && React.createElement('div', { key: 'error', className: "bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4" }, 
+                                    React.createElement('div', { className: "flex items-center" }, [
+                                        React.createElement('div', { key: 'error-icon', className: "w-4 h-4 text-yellow-500 mr-2" }, React.createElement(AlertCircle)),
+                                        React.createElement('div', { key: 'error-content', className: "text-xs text-yellow-800" }, [
+                                            React.createElement('p', { key: 'error-msg', className: "font-semibold" }, error),
+                                            React.createElement('p', { key: 'error-continue', className: "mt-1" }, "將使用測試資料繼續")
+                                        ])
+                                    ])
+                                ),
+
+                                !isProcessing && React.createElement('button', { 
+                                    key: 'retry-btn',
+                                    onClick: () => searchRefDataWithId(companyId),
+                                    disabled: !companyId,
+                                    className: "bg-blue-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-600 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                }, "重新載入參考資料")
+                            ]),
+
+                            // Step 3: Data cleaning
+                            step === 3 && React.createElement('div', { key: 'step3', className: "text-center" }, [
+                                React.createElement('h2', { key: 'title', className: "text-lg font-bold mb-3" }, "初步資料清理"),
+                                React.createElement('p', { key: 'desc', className: "text-sm text-gray-600 mb-4" }, "正在根據 n8n 參考資料進行自動判斷..."),
+
+                                !isProcessing && refData.length > 0 && React.createElement('div', { key: 'ref-data-table', className: "bg-gray-50 rounded-lg p-3 mb-4" }, [
+                                    React.createElement('h3', { key: 'table-title', className: "text-sm font-semibold mb-3 text-center" }, "使用的參考資料："),
+                                    React.createElement('div', { key: 'table-container', className: "overflow-x-auto" }, 
+                                        React.createElement('table', { className: "w-full text-xs mx-auto" }, [
+                                            React.createElement('thead', { key: 'table-head' }, 
+                                                React.createElement('tr', { className: "border-b border-gray-300" }, [
+                                                    React.createElement('th', { key: 'col1', className: "text-center py-2 px-2 font-medium text-gray-700" }, "類型"),
+                                                    React.createElement('th', { key: 'col2', className: "text-center py-2 px-2 font-medium text-gray-700" }, "供應商統編"),
+                                                    React.createElement('th', { key: 'col3', className: "text-center py-2 px-2 font-medium text-gray-700" }, "關鍵字")
+                                                ])
+                                            ),
+                                            React.createElement('tbody', { key: 'table-body' }, 
+                                                refData.map((ref, index) => 
+                                                    React.createElement('tr', { key: `row-${index}`, className: "border-b border-gray-200" }, [
+                                                        React.createElement('td', { key: 'type', className: "py-2 px-2 text-center" }, 
+                                                            React.createElement('span', { 
+                                                                className: `inline-flex px-2 py-1 text-xs font-medium rounded-full ${ref.deductable === 'Yes' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`
+                                                            }, ref.deductable === 'Yes' ? '可扣抵' : '不可扣抵')
+                                                        ),
+                                                        React.createElement('td', { key: 'seller', className: "py-2 px-2 text-gray-600 text-center" }, ref.sellerId || '-'),
+                                                        React.createElement('td', { key: 'keyword', className: "py-2 px-2 text-gray-600 text-center" }, ref.keyword || '-')
+                                                    ])
+                                                )
+                                            )
+                                        ])
+                                    )
+                                ]),
+
+                                React.createElement('div', { key: 'progress-container', className: "mb-4" }, [
+                                    React.createElement('div', { key: 'progress-bar', className: "w-full bg-gray-200 rounded-full h-2 mb-3" }, 
+                                        React.createElement('div', { 
+                                            className: "bg-blue-500 h-2 rounded-full transition-all duration-300",
+                                            style: { width: progress + '%' }
+                                        })
+                                    ),
+                                    React.createElement('p', { key: 'progress-text', className: "text-sm text-gray-600" }, "處理中... ", progress, "%")
+                                ])
+                            ]),
+
+                            // Step 4: Review pending items
+                            step === 4 && React.createElement('div', { key: 'step4' }, 
+                                pendingReviews.length === 0 ? 
+                                    React.createElement('div', { className: "text-center" }, [
+                                        React.createElement('div', { key: 'success-icon', className: "w-12 h-12 mx-auto mb-3 text-green-500" }, React.createElement(CheckCircle)),
+                                        React.createElement('h2', { key: 'title', className: "text-lg font-bold mb-3" }, "無待審核項目"),
+                                        React.createElement('button', { 
+                                            key: 'continue-btn',
+                                            onClick: () => setStep(5), 
+                                            className: "bg-blue-500 text-white px-4 py-2 text-sm rounded-lg" 
+                                        }, "查看結果")
+                                    ]) :
+                                    React.createElement('div', { className: "h-full flex flex-col" }, [
+                                        // Header
+                                        React.createElement('div', { key: 'header', className: "h-8 flex justify-between items-center flex-shrink-0" }, [
+                                            React.createElement('h2', { className: "text-lg font-bold" }, "逐筆審核待查項目"),
+                                            React.createElement('p', { className: "text-sm text-gray-600" }, "進度：", currentReviewIndex + 1, " / ", pendingReviews.length)
+                                        ]),
+
+                                        // Content area
+                                        React.createElement('div', { key: 'content-area', className: "bg-white border rounded-lg p-4 flex-shrink-0", style: {height: '320px'} }, [
+                                            // Invoice info
+                                            React.createElement('div', { key: 'invoice-info', className: "grid grid-cols-2 gap-4 mb-3 h-12" }, [
+                                                React.createElement('div', { key: 'invoice-num' }, [
+                                                    React.createElement('label', { className: "block text-xs font-medium text-gray-700 mb-1" }, "發票號碼"),
+                                                    React.createElement('p', { className: "text-sm font-semibold" }, pendingReviews[currentReviewIndex].invoiceNumber)
+                                                ]),
+                                                React.createElement('div', { key: 'seller-info' }, [
+                                                    React.createElement('label', { className: "block text-xs font-medium text-gray-700 mb-1" }, "賣方資訊"),
+                                                    React.createElement('p', { 
+                                                        className: "text-sm font-semibold truncate",
+                                                        title: `${pendingReviews[currentReviewIndex].sellerId} ${pendingReviews[currentReviewIndex].sellerName}`
+                                                    }, pendingReviews[currentReviewIndex].sellerId, " ", pendingReviews[currentReviewIndex].sellerName)
+                                                ])
+                                            ]),
+
+                                            // Items list
+                                            React.createElement('div', { key: 'items-section', className: "mb-3" }, [
+                                                React.createElement('label', { key: 'items-label', className: "block text-xs font-medium text-gray-700 mb-2" }, "發票商品明細"),
+                                                React.createElement('div', { key: 'items-list', className: "space-y-2 overflow-y-auto bg-gray-50 rounded p-2", style: {height: '140px'} }, 
+                                                    pendingReviews[currentReviewIndex].consolidatedItems && 
+                                                    pendingReviews[currentReviewIndex].consolidatedItems.map((item, index) => 
+                                                        React.createElement('div', { key: `item-${index}`, className: "bg-white p-2 rounded shadow-sm" }, 
+                                                            React.createElement('span', { className: "text-xs text-gray-800" }, item)
+                                                        )
+                                                    )
+                                                )
+                                            ]),
+
+                                            // Keyword input
+                                            React.createElement('div', { key: 'keyword-section' }, [
+                                                React.createElement('label', { key: 'keyword-label', className: "block text-xs font-medium text-gray-700 mb-2" }, [
+                                                    "新增關鍵字（選填）",
+                                                    React.createElement('span', { className: "text-green-600 ml-1" }, "將同步至 n8n")
+                                                ]),
+                                                React.createElement('input', { 
+                                                    key: 'keyword-input',
+                                                    type: "text",
+                                                    value: newKeyword,
+                                                    onChange: (e) => setNewKeyword(e.target.value),
+                                                    placeholder: "輸入新的可扣抵商品關鍵字，多個請用逗號分隔",
+                                                    className: "w-full p-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                                })
+                                            ])
+                                        ]),
+
+                                        // Buttons
+                                        React.createElement('div', { key: 'buttons', className: "h-12 flex gap-3 items-center flex-shrink-0" }, [
+                                            React.createElement('button', { 
+                                                key: 'deductible-btn',
+                                                onClick: () => handleReviewDecision('deductible'),
+                                                className: "flex-1 bg-green-500 text-white px-4 py-2 text-xs rounded-lg hover:bg-green-600 transition-colors flex items-center justify-center gap-2"
+                                            }, [
+                                                React.createElement('div', { key: 'check-icon', className: "w-3 h-3" }, React.createElement(CheckCircle)),
+                                                "可扣抵"
+                                            ]),
+                                            React.createElement('button', { 
+                                                key: 'non-deductible-btn',
+                                                onClick: () => handleReviewDecision('non-deductible'),
+                                                className: "flex-1 bg-red-500 text-white px-4 py-2 text-xs rounded-lg hover:bg-red-600 transition-colors flex items-center justify-center gap-2"
+                                            }, [
+                                                React.createElement('div', { key: 'x-icon', className: "w-3 h-3" }, React.createElement(XCircle)),
+                                                "不可扣抵"
+                                            ])
+                                        ])
+                                    ])
+                            ),
+
+                            // Step 5: Results review
+                            step === 5 && React.createElement('div', { key: 'step5' }, [
+                                React.createElement('h2', { key: 'title', className: "text-lg font-bold mb-2" }, "處理結果檢視"),
+                                React.createElement('p', { key: 'desc', className: "text-sm text-gray-600 mb-4" }, "點擊任一筆記錄可重新審核或修改結果"),
+
+                                React.createElement('div', { key: 'results-list', className: "space-y-3 mb-4" }, 
+                                    invoiceData.map((invoice) => {
+                                        const deductible = invoice.buyerNote === '';
+                                        const nonDeductible = invoice.buyerNote === '不得抵扣之進貨及費用';
+                                        
+                                        return React.createElement('div', { key: invoice.invoiceNumber, className: "bg-white border rounded-lg p-3 shadow-sm" }, [
+                                            React.createElement('div', { key: 'invoice-header', className: "flex items-center justify-between mb-2" }, [
+                                                React.createElement('div', { key: 'status-info', className: "flex items-center gap-3" }, [
+                                                    React.createElement('span', { 
+                                                        className: `inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                                            deductible ? 'bg-green-100 text-green-800' : 
+                                                            nonDeductible ? 'bg-red-100 text-red-800' : 
+                                                            'bg-yellow-100 text-yellow-800'
+                                                        }`
+                                                    }, deductible ? '可扣抵' : nonDeductible ? '不可扣抵' : '待查'),
+                                                    React.createElement('span', { className: "text-sm font-semibold text-gray-900" }, invoice.invoiceNumber),
+                                                    React.createElement('span', { className: "text-xs text-gray-500" }, invoice.sellerId, " - ", invoice.sellerName)
+                                                ]),
+                                                React.createElement('button', { 
+                                                    key: 'edit-btn',
+                                                    onClick: () => openEditModal(invoice),
+                                                    className: "text-blue-600 hover:text-blue-900 font-medium text-xs"
+                                                }, "編輯")
+                                            ]),
+                                            
+                                            React.createElement('div', { key: 'items-display' }, [
+                                                React.createElement('h4', { key: 'items-title', className: "text-xs font-medium text-gray-700 mb-1" }, "商品明細："),
+                                                React.createElement('div', { key: 'items-content', className: "space-y-1" }, 
+                                                    invoice.consolidatedItems && invoice.consolidatedItems.length > 0 ? 
+                                                        invoice.consolidatedItems.map((item, idx) => 
+                                                            React.createElement('div', { key: `item-${idx}`, className: "bg-gray-50 px-2 py-1 rounded text-xs text-gray-800" }, item)
+                                                        ) :
+                                                        React.createElement('div', { className: "text-gray-400 italic text-xs" }, "無商品資料")
+                                                )
+                                            ])
+                                        ]);
+                                    })
+                                ),
+
+                                React.createElement('div', { key: 'continue-section', className: "text-center" }, 
+                                    React.createElement('button', { 
+                                        onClick: () => setStep(6),
+                                        className: "bg-blue-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-600 transition-colors"
+                                    }, "確認完成")
+                                )
+                            ]),
+
+                            // Step 6: Complete
+                            step === 6 && React.createElement('div', { key: 'step6', className: "text-center" }, [
+                                React.createElement('div', { key: 'success-icon', className: "w-12 h-12 mx-auto mb-3 text-green-500" }, React.createElement(CheckCircle)),
+                                React.createElement('h2', { key: 'title', className: "text-lg font-bold mb-3" }, "審核完成"),
+                                React.createElement('p', { key: 'desc', className: "text-sm text-gray-600 mb-4" }, "所有發票已完成審核處理，可以下載結果"),
+
+                                React.createElement('div', { key: 'action-buttons', className: "space-y-3" }, [
+                                    React.createElement('button', { 
+                                        key: 'download-btn',
+                                        onClick: downloadResults,
+                                        className: "bg-green-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-green-600 transition-colors flex items-center gap-2 mx-auto"
+                                    }, [
+                                        React.createElement('div', { key: 'save-icon', className: "w-3 h-3" }, React.createElement(Save)),
+                                        "下載處理結果"
+                                    ]),
+                                    
+                                    React.createElement('button', { 
+                                        key: 'back-btn',
+                                        onClick: () => setStep(5),
+                                        className: "bg-gray-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-gray-600 transition-colors flex items-center gap-2 mx-auto"
+                                    }, "返回結果列表"),
+                                    
+                                    React.createElement('button', { 
+                                        key: 'new-file-btn',
+                                        onClick: () => {
+                                            setStep(1);
+                                            setUploadedFile(null);
+                                            setInvoiceData([]);
+                                            setInvoiceDetailsData([]);
+                                            setOriginalInvoiceData([]);
+                                            setOriginalDetailsData([]);
+                                            setPendingReviews([]);
+                                            setCurrentReviewIndex(0);
+                                            setError('');
+                                        },
+                                        className: "bg-blue-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-600 transition-colors flex items-center gap-2 mx-auto"
+                                    }, "處理新檔案")
+                                ])
+                            ])
+                        ]),
+                        
+                        // Edit Modal
+                        showEditModal && editingInvoice && React.createElement('div', { 
+                            key: 'edit-modal',
+                            className: "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" 
+                        }, 
+                            React.createElement('div', { className: "bg-white rounded-lg p-4 max-w-2xl w-full mx-4 max-h-96 overflow-y-auto" }, [
+                                React.createElement('h3', { key: 'modal-title', className: "text-sm font-bold mb-3" }, "編輯發票審核結果"),
+                                
+                                React.createElement('div', { key: 'modal-info', className: "grid grid-cols-2 gap-3 mb-3" }, [
+                                    React.createElement('div', { key: 'invoice-num' }, [
+                                        React.createElement('label', { className: "block text-xs font-medium text-gray-700 mb-1" }, "發票號碼"),
+                                        React.createElement('p', { className: "text-sm font-semibold" }, editingInvoice.invoiceNumber)
+                                    ]),
+                                    React.createElement('div', { key: 'seller-id' }, [
+                                        React.createElement('label', { className: "block text-xs font-medium text-gray-700 mb-1" }, "賣方統一編號"),
+                                        React.createElement('p', { className: "text-sm font-semibold" }, editingInvoice.sellerId)
+                                    ])
+                                ]),
+                                
+                                React.createElement('div', { key: 'seller-name', className: "mb-3" }, [
+                                    React.createElement('label', { className: "block text-xs font-medium text-gray-700 mb-1" }, "賣方名稱"),
+                                    React.createElement('p', { className: "text-sm" }, editingInvoice.sellerName)
+                                ]),
+
+                                React.createElement('div', { key: 'modal-items', className: "mb-4" }, [
+                                    React.createElement('label', { className: "block text-xs font-medium text-gray-700 mb-2" }, "發票商品"),
+                                    React.createElement('div', { className: "space-y-1 max-h-32 overflow-y-auto" }, 
+                                        editingInvoice.consolidatedItems && editingInvoice.consolidatedItems.length > 0 ?
+                                            editingInvoice.consolidatedItems.map((item, index) => 
+                                                React.createElement('div', { key: `modal-item-${index}`, className: "bg-gray-50 p-2 rounded text-xs" }, 
+                                                    React.createElement('span', { className: "text-gray-800" }, item)
+                                                )
+                                            ) :
+                                            React.createElement('p', { className: "text-xs text-gray-500" }, "無商品資料")
+                                    )
+                                ]),
+
+                                React.createElement('div', { key: 'modal-keyword', className: "mb-4" }, [
+                                    React.createElement('label', { className: "block text-xs font-medium text-gray-700 mb-2" }, [
+                                        "新增關鍵字（選填）",
+                                        React.createElement('span', { className: "text-green-600 ml-1" }, "將同步至 n8n")
+                                    ]),
+                                    React.createElement('input', { 
+                                        type: "text",
+                                        value: newKeyword,
+                                        onChange: (e) => setNewKeyword(e.target.value),
+                                        placeholder: "輸入新的可扣抵商品關鍵字，多個請用逗號分隔",
+                                        className: "w-full p-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                    })
+                                ]),
+
+                                React.createElement('div', { key: 'modal-buttons', className: "flex gap-3" }, [
+                                    React.createElement('button', { 
+                                        onClick: () => handleEditDecision('deductible'),
+                                        className: "flex-1 bg-green-500 text-white px-3 py-2 text-xs rounded-lg hover:bg-green-600 transition-colors flex items-center justify-center gap-1"
+                                    }, [
+                                        React.createElement('div', { key: 'check-icon', className: "w-3 h-3" }, React.createElement(CheckCircle)),
+                                        "可扣抵"
+                                    ]),
+                                    React.createElement('button', { 
+                                        onClick: () => handleEditDecision('non-deductible'),
+                                        className: "flex-1 bg-red-500 text-white px-3 py-2 text-xs rounded-lg hover:bg-red-600 transition-colors flex items-center justify-center gap-1"
+                                    }, [
+                                        React.createElement('div', { key: 'x-icon', className: "w-3 h-3" }, React.createElement(XCircle)),
+                                        "不可扣抵"
+                                    ]),
+                                    React.createElement('button', { 
+                                        onClick: closeEditModal,
+                                        className: "flex-1 bg-gray-500 text-white px-3 py-2 text-xs rounded-lg hover:bg-gray-600 transition-colors"
+                                    }, "取消")
+                                ])
+                            ])
+                        )
+                    ])
+                ])
+            ]);
+        }
+
+        ReactDOM.render(React.createElement(InvoiceReviewSystem), document.getElementById('root'));
+    </script>
+</body>
+</html>
