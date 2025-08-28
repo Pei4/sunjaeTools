@@ -94,7 +94,12 @@
 
             // n8n API 配置
             const N8N_BASE = "https://pei4.zeabur.app";
-            const N8N_KEY = "esr4dfg8651szdg21vzs3d";
+            const urlParams = new URLSearchParams(window.location.search);
+            const N8N_KEY = urlParams.get("key");  // 使用者手動放在 ?key=xxxx
+            if (!N8N_KEY) {
+              alert("請在網址中提供 key，例如 ?key=你的key");
+              throw new Error("Missing API key");
+            }
 
             // n8n API 函式
             async function fetchRefDataFromN8n(customerId) {
