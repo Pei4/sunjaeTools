@@ -26,13 +26,21 @@
     }
 
     async function fetchRefDataFromN8n(customerId) {
-      const url = `${N8N_BASE}/webhook/get-ref-data?customerId=${encodeURIComponent(customerId)}`;
-      const res = await fetch(url, {
-        headers: { "X-API-Key": N8N_KEY, "Content-Type": "application/json" }
-      });
-      if (!res.ok) throw new Error(`n8n 讀取失敗 ${res.status}`);
-      return await res.json();
-    }
+  const url = `${N8N_BASE}/webhook/get-ref-data?customerId=${encodeURIComponent(customerId)}`;
+  const res = await fetch(url, {
+    method: "GET",
+    // 重要：GET 不要送 Content-Type，避免觸發預檢
+    headers: { "X-API-Key": N8N_KEY },
+    mode: "cors",
+    credentials: "omit",
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(()=> "");
+    throw new Error(`n8n 讀取失敗 ${res.status} ${t}`);
+  }
+  return res.json();
+}
+
 
     async function addRefRuleToN8n(rule) {
       const url = `${N8N_BASE}/webhook/add-ref-data`;
