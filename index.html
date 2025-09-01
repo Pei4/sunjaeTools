@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>進項扣抵小工具</title>
+  <title>進項扣抵審核工具</title>
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -27,8 +27,8 @@
 
     async function fetchRefDataFromN8n(customerId) {
       const url = `${N8N_BASE}/webhook/get-ref-data?customerId=${encodeURIComponent(customerId)}`;
-      const res = await fetch(url, { 
-        headers: { "X-API-Key": N8N_KEY, "Content-Type": "application/json" } 
+      const res = await fetch(url, {
+        headers: { "X-API-Key": N8N_KEY, "Content-Type": "application/json" }
       });
       if (!res.ok) throw new Error(`n8n 讀取失敗 ${res.status}`);
       return await res.json();
@@ -240,7 +240,7 @@
         const detailsSheet = XLSX.utils.aoa_to_sheet(detailsSheetData);
         XLSX.utils.book_append_sheet(wb, detailsSheet, "Invoice_details");
 
-        XLSX.writeFile(wb, `${companyId}_reviewed.xlsx`);
+        XLSX.writeFile(wb, `${companyId}_${new Date().toISOString().slice(0,10)}_reviewed.xlsx`);
       };
 
       // --- UI ---
