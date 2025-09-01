@@ -1,320 +1,538 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>進項扣抵審核工具</title>
+  <!-- 可用於開發與小型專案；若要 Production 最佳化，建議改用打包編譯 -->
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    .container-narrow { width: 100%; }
+    @media (min-width: 1024px){ .container-narrow { width: 820px; margin: 0 auto; } }
+    .mono { font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace }
+  </style>
 </head>
-<body>
+<body class="bg-gray-50">
   <div id="root"></div>
 
   <script type="text/babel">
     const { useState } = React;
 
-    // --- n8n API 配置 ---
+    // ===== n8n API 設定 =====
     const N8N_BASE = "https://pei4.zeabur.app";
     const urlParams = new URLSearchParams(window.location.search);
     const N8N_KEY = urlParams.get("key");
-    if (!N8N_KEY) {
-      alert("請在網址中提供 key，例如 ?key=你的key");
-      throw new Error("Missing API key");
+
+    function assertKey() {
+      if (!N8N_KEY) {
+        alert("請在網址加上 ?key=你的金鑰");
+        throw new Error("Missing X-API-Key");
+      }
     }
 
     async function fetchRefDataFromN8n(customerId) {
-  const url = `${N8N_BASE}/webhook/get-ref-data?customerId=${encodeURIComponent(customerId)}`;
-  const res = await fetch(url, {
-    method: "GET",
-    // 重要：GET 不要送 Content-Type，避免觸發預檢
-    headers: { "X-API-Key": N8N_KEY },
-    mode: "cors",
-    credentials: "omit",
-  });
-  if (!res.ok) {
-    const t = await res.text().catch(()=> "");
-    throw new Error(`n8n 讀取失敗 ${res.status} ${t}`);
-  }
-  return res.json();
-}
-
+      assertKey();
+      const url = `${N8N_BASE}/webhook/get-ref-data?customerId=${encodeURIComponent(customerId)}`;
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { "X-API-Key": N8N_KEY }, // 不帶 Content-Type，避免預檢
+        mode: "cors",
+        credentials: "omit",
+      });
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        throw new Error(`n8n 讀取失敗 ${res.status} ${t}`);
+      }
+      return res.json();
+    }
 
     async function addRefRuleToN8n(rule) {
+      assertKey();
       const url = `${N8N_BASE}/webhook/add-ref-data`;
       const res = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-API-Key": N8N_KEY },
-        body: JSON.stringify(rule)
+        headers: { "X-API-Key": N8N_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify(rule),
       });
-      if (!res.ok) throw new Error(`n8n 寫入失敗 ${res.status}`);
-      return await res.json();
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        throw new Error(`n8n 寫入失敗 ${res.status} ${t}`);
+      }
+      return res.json();
     }
 
-    function InvoiceReviewSystem() {
+    // ===== 實用工具：欄位偵測與安全取值 =====
+    function idxOf(headers, candidates, fallbackIdx = -1) {
+      const set = new Set(headers.map(String));
+      for (const c of candidates) {
+        if (set.has(c)) return headers.indexOf(c);
+      }
+      return fallbackIdx;
+    }
+
+    function toStr(x){ return (x==null ? "" : String(x)).trim(); }
+
+    function InvoiceReviewApp(){
+      // ===== 狀態 =====
       const [step, setStep] = useState(1);
-      const [companyId, setCompanyId] = useState('');
-      const [uploadedFile, setUploadedFile] = useState(null);
-      const [invoiceData, setInvoiceData] = useState([]);
-      const [invoiceDetailsData, setInvoiceDetailsData] = useState([]);
-      const [originalInvoiceData, setOriginalInvoiceData] = useState([]);
-      const [originalDetailsData, setOriginalDetailsData] = useState([]);
-      const [invoiceHeaders, setInvoiceHeaders] = useState([]);
-      const [detailsHeaders, setDetailsHeaders] = useState([]);
-      const [refData, setRefData] = useState([]);
-      const [pendingReviews, setPendingReviews] = useState([]);
-      const [currentReviewIndex, setCurrentReviewIndex] = useState(0);
-      const [newKeyword, setNewKeyword] = useState('');
-      const [includeSellerID, setIncludeSellerID] = useState(false);
+      const [companyId, setCompanyId] = useState("");
+      const [error, setError] = useState("");
       const [isProcessing, setIsProcessing] = useState(false);
       const [progress, setProgress] = useState(0);
-      const [error, setError] = useState('');
-      const [newlyAddedRefData, setNewlyAddedRefData] = useState([]);
 
-      // fallback 測試資料
+      // 解析時同時保留 AOA（原始資料）與 Headers（欄位順序）
+      const [invHeaders, setInvHeaders] = useState([]);
+      const [detHeaders, setDetHeaders] = useState([]);
+      const [invRowsAOA, setInvRowsAOA]   = useState([]); // 不含表頭
+      const [detRowsAOA, setDetRowsAOA]   = useState([]); // 不含表頭
+
+      // 結構化資料（僅用於邏輯與顯示）
+      const [invoices, setInvoices] = useState([]);       // { idx, row:[], buyerNote, invoiceNumber, sellerId, items:[] }
+      const [details, setDetails]   = useState([]);       // { idx, row:[], invoiceNumber, itemName }
+
+      const [refData, setRefData] = useState([]);         // n8n 規則
+      const [pending, setPending] = useState([]);         // invoice idx 陣列（尚待審核）
+      const [cursor, setCursor] = useState(0);
+
+      const [newKeyword, setNewKeyword] = useState("");
+      const [includeSellerId, setIncludeSellerId] = useState(false);
+      const [addedRules, setAddedRules] = useState([]);
+
+      // 測試資料（當 n8n 取不到時可用）
       const fallbackRefData = [
-        { customerId: '87097348', deductable: 'Yes', sellerId: '27365925', keyword: '面膜' },
-        { customerId: '87097348', deductable: 'Yes', sellerId: '27365925', keyword: '防曬' },
-        { customerId: '28152246', deductable: 'No', sellerId: '28152246', keyword: '' },
-        { customerId: '28152246', deductable: 'No', sellerId: '', keyword: '餐飲' },
-        { customerId: '28152246', deductable: 'No', sellerId: '', keyword: '料理' },
-        { customerId: '28152246', deductable: 'Yes', sellerId: '13750574', keyword: '運什費' },
-        { customerId: '28152246', deductable: 'Yes', sellerId: '52003801', keyword: '' },
-        { customerId: '28152246', deductable: 'Yes', sellerId: '05386910', keyword: '' },
+        { customerId: "87097348", deductable: "Yes", sellerId: "27365925", keyword: "面膜" },
+        { customerId: "87097348", deductable: "Yes", sellerId: "27365925", keyword: "防曬" },
+        { customerId: "28152246", deductable: "No",  sellerId: "28152246", keyword: "" },
+        { customerId: "28152246", deductable: "No",  sellerId: "",         keyword: "餐飲" },
+        { customerId: "28152246", deductable: "No",  sellerId: "",         keyword: "料理" },
+        { customerId: "28152246", deductable: "Yes", sellerId: "13750574", keyword: "運什費" },
+        { customerId: "28152246", deductable: "Yes", sellerId: "52003801", keyword: "" },
+        { customerId: "28152246", deductable: "Yes", sellerId: "05386910", keyword: "" },
       ];
 
-      // --- Excel 讀取 ---
-      const handleFileUpload = async (event) => {
-        const file = event.target.files[0];
-        if (!file) return;
-        if (!file.name.endsWith('.xlsx')) {
-          setError('請上傳 Excel 檔案（.xlsx格式）');
-          return;
-        }
-        setError('');
-        setUploadedFile(file);
-        const extractedCompanyId = file.name.substring(0, 8);
-        setCompanyId(extractedCompanyId);
-        try {
-          const invoiceSheetData = await readExcelSheet(file, 'Invoice');
-          const detailsSheetData = await readExcelSheet(file, 'Invoice_details');
-          setOriginalInvoiceData(invoiceSheetData.data);
-          setInvoiceHeaders(invoiceSheetData.headers);
-          setOriginalDetailsData(detailsSheetData.data);
-          setDetailsHeaders(detailsSheetData.headers);
-          setInvoiceData(invoiceSheetData.data);
-          setInvoiceDetailsData(detailsSheetData.data);
-          setStep(2);
-          setTimeout(() => searchRefData(extractedCompanyId), 500);
-        } catch (err) {
-          setError('檔案讀取失敗：' + err.message);
-        }
-      };
-
-      const readExcelSheet = async (file, sheetName) => {
+      // ===== 讀取 Excel =====
+      async function readSheet(file, sheetName){
         return new Promise((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = (e) => {
-            try {
-              const data = new Uint8Array(e.target.result);
-              const workbook = XLSX.read(data, { type: 'array' });
-              if (!workbook.SheetNames.includes(sheetName)) {
-                reject(new Error('找不到工作表: ' + sheetName));
+            try{
+              const wb = XLSX.read(new Uint8Array(e.target.result), { type:"array" });
+              if (!wb.SheetNames.includes(sheetName)) {
+                reject(new Error(`找不到工作表: ${sheetName}`));
                 return;
               }
-              const worksheet = workbook.Sheets[sheetName];
-              const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-              const headers = jsonData[0] || [];
-              const rows = jsonData.slice(1);
-
-              const formatted = rows.map((row, i) => {
-                const obj = {};
-                headers.forEach((h, j) => { obj[h] = row[j] || ''; });
-                obj.rowIndex = i + 2;
-                return obj;
-              }).filter(item => Object.values(item).some(v => v !== ''));
-              resolve({ headers, data: formatted });
-            } catch (err) { reject(err); }
+              const ws = wb.Sheets[sheetName];
+              const aoa = XLSX.utils.sheet_to_json(ws, { header:1, raw:true });
+              if (!aoa.length) reject(new Error(`${sheetName} 無資料`));
+              const headers = aoa[0].map(v => toStr(v));
+              const rows    = aoa.slice(1);
+              resolve({ headers, rows });
+            }catch(err){ reject(err); }
           };
-          reader.onerror = () => reject(new Error('檔案讀取失敗'));
+          reader.onerror = () => reject(new Error("檔案讀取失敗"));
           reader.readAsArrayBuffer(file);
         });
-      };
+      }
 
-      // --- 載入參考資料 ---
-      const searchRefData = async (customerId) => {
-        try {
-          setIsProcessing(true);
-          const n8nData = await fetchRefDataFromN8n(customerId);
-          setRefData(n8nData);
+      async function onUpload(e){
+        try{
+          setError("");
+          const file = e.target.files?.[0];
+          if (!file) return;
+          if (!file.name.endsWith(".xlsx")) {
+            setError("請上傳 .xlsx 檔案");
+            return;
+          }
+          // 從檔名前 8 碼抓統編
+          const cid = file.name.slice(0,8);
+          setCompanyId(cid);
+
+          const inv = await readSheet(file, "Invoice");
+          const det = await readSheet(file, "Invoice_details");
+
+          setInvHeaders(inv.headers);
+          setDetHeaders(det.headers);
+          setInvRowsAOA(inv.rows);
+          setDetRowsAOA(det.rows);
+
+          // 欄位定位（容錯）
+          const colInvoiceNumber = idxOf(inv.headers, ["發票號碼","InvoiceNumber"], 0);
+          const colBuyerNote     = idxOf(inv.headers, ["買受人註記","buyerNote"], 1);
+          const colSellerId      = idxOf(inv.headers, ["賣方統一編號","賣方統編","SellerId"], 7);
+          const colSellerName    = idxOf(inv.headers, ["賣方名稱","SellerName"], 8);
+
+          const colDetInvNum     = idxOf(det.headers, ["發票號碼","InvoiceNumber"], 0);
+          const colDetItemName   = idxOf(det.headers, ["品名","ItemName"], 3);
+
+          // 轉成利於處理的結構
+          const detailsStruct = det.rows
+            .map((r, i) => ({
+              idx: i,
+              row: r,
+              invoiceNumber: toStr(r[colDetInvNum]),
+              itemName: toStr(r[colDetItemName]),
+            }))
+            .filter(d => d.invoiceNumber && d.itemName);
+          setDetails(detailsStruct);
+
+          const invoicesStruct = inv.rows
+            .map((r, i) => ({
+              idx: i,
+              row: r,
+              buyerNoteCol: colBuyerNote,
+              invoiceNumber: toStr(r[colInvoiceNumber]),
+              sellerId: toStr(r[colSellerId]),
+              sellerName: toStr(r[colSellerName]),
+              buyerNote: toStr(r[colBuyerNote]),
+              items: [], // 稍後填
+            }))
+            .filter(v => v.invoiceNumber);
+          setInvoices(invoicesStruct);
+
+          setStep(2);
+          // 自動取 n8n 規則
+          setTimeout(() => loadRef(cid), 200);
+        }catch(err){
+          console.error(err);
+          setError(err.message || String(err));
+        }
+      }
+
+      async function loadRef(customerId){
+        setIsProcessing(true);
+        try{
+          let data = [];
+          try{
+            data = await fetchRefDataFromN8n(customerId);
+          }catch(n8err){
+            console.warn("n8n 失敗，改用 fallback", n8err);
+            data = fallbackRefData.filter(x => x.customerId === customerId);
+          }
+          setRefData(data);
           setStep(3);
-          setTimeout(() => initialDataCleaning(n8nData), 100);
-        } catch (e) {
-          console.error("載入失敗，改用 fallback", e);
-          const filtered = fallbackRefData.filter(r => r.customerId === customerId);
-          setRefData(filtered);
-          setStep(3);
-          setTimeout(() => initialDataCleaning(filtered), 100);
-        } finally {
+          setTimeout(() => doCleaning(data), 100);
+        }finally{
           setIsProcessing(false);
         }
-      };
+      }
 
-      // --- 初步清理 ---
-      const initialDataCleaning = (currentRefData) => {
+      // ===== 初步清理（自動判斷）=====
+      function doCleaning(refs){
         setIsProcessing(true);
         setProgress(0);
-        const interval = setInterval(() => {
-          setProgress(prev => {
-            if (prev >= 100) {
-              clearInterval(interval);
-              setIsProcessing(false);
-              const cleanedData = originalInvoiceData.map(invoice => {
-                const invoiceItems = originalDetailsData
-                  .filter(d => d["發票號碼"] === invoice["發票號碼"])
-                  .map(d => d["品名"]);
-                let note = '待查';
-                if (currentRefData.some(ref => ref.deductable === 'Yes' &&
-                    (ref.sellerId === invoice["賣方統編"] || invoiceItems.some(it => it.includes(ref.keyword))))) {
-                  note = '';
-                } else if (currentRefData.some(ref => ref.deductable === 'No' &&
-                    (ref.sellerId === invoice["賣方統編"] || invoiceItems.some(it => it.includes(ref.keyword))))) {
-                  note = '不得抵扣之進貨及費用';
-                }
-                return { ...invoice, "買受人註記": note, items: invoiceItems };
+
+        // 建立：發票號碼 -> 明細品名陣列
+        const itemsMap = new Map();
+        for (const d of details) {
+          if (!itemsMap.has(d.invoiceNumber)) itemsMap.set(d.invoiceNumber, []);
+          itemsMap.get(d.invoiceNumber).push(d.itemName);
+        }
+
+        // 模擬處理進度
+        const timer = setInterval(() => {
+          setProgress(p => {
+            if (p >= 100){
+              clearInterval(timer);
+              // 實際清理
+              const next = invoices.map(v => {
+                const items = itemsMap.get(v.invoiceNumber) || [];
+                const judge = judgeNote(v.sellerId, items, refs);
+                // 回寫到結構
+                return { ...v, items, buyerNote: judge };
               });
-              setInvoiceData(cleanedData);
-              setPendingReviews(cleanedData.filter(i => i["買受人註記"] === '待查'));
-              setStep(cleanedData.some(i => i["買受人註記"] === '待查') ? 4 : 5);
+              setInvoices(next);
+
+              // 建立 pending list
+              const pend = next.filter(v => v.buyerNote === "待查").map(v => v.idx);
+              setPending(pend);
+              setCursor(0);
+
+              setStep(pend.length ? 4 : 5);
+              setIsProcessing(false);
               return 100;
             }
-            return prev + 20;
+            return p + 20;
           });
-        }, 200);
-      };
+        }, 180);
+      }
 
-      // --- 審核決策 ---
-      const handleReviewDecision = (decision) => {
-        const currentInvoice = pendingReviews[currentReviewIndex];
-        const updatedData = invoiceData.map(inv =>
-          inv["發票號碼"] === currentInvoice["發票號碼"]
-            ? { ...inv, "買受人註記": decision === 'deductible' ? '' : '不得抵扣之進貨及費用' }
-            : inv
+      function judgeNote(sellerId, items, refs){
+        // 可扣抵：deductable=Yes & (賣方統編相同 或 明細包含關鍵字)
+        const yes = refs.some(ref =>
+          ref.deductable === "Yes" &&
+          (
+            (toStr(ref.sellerId) && toStr(ref.sellerId) === toStr(sellerId)) ||
+            (toStr(ref.keyword) && items.some(x => x.includes(toStr(ref.keyword))))
+          )
         );
-        setInvoiceData(updatedData);
-        if (newKeyword.trim()) {
-          const newRule = { customerId: companyId, deductable: decision === 'deductible' ? 'Yes' : 'No', sellerId: includeSellerID ? currentInvoice["賣方統編"] : '', keyword: newKeyword.trim() };
-          setRefData(prev => [...prev, newRule]);
-          setNewlyAddedRefData(prev => [...prev, newRule]);
-          addRefRuleToN8n(newRule).catch(console.error);
-          setNewKeyword('');
-          setIncludeSellerID(false);
-        }
-        if (currentReviewIndex < pendingReviews.length - 1) setCurrentReviewIndex(i => i + 1);
-        else setStep(5);
-      };
+        if (yes) return "";
 
-      // --- 確認完成 ---
-      const handleConfirmCompletion = async () => {
-        for (const rule of newlyAddedRefData) {
-          try { await addRefRuleToN8n(rule); } catch (e) { console.error(e); }
+        // 不可扣抵：deductable=No & (賣方統編相同 或 明細包含關鍵字)
+        const no = refs.some(ref =>
+          ref.deductable === "No" &&
+          (
+            (toStr(ref.sellerId) && toStr(ref.sellerId) === toStr(sellerId)) ||
+            (toStr(ref.keyword) && items.some(x => x.includes(toStr(ref.keyword))))
+          )
+        );
+        if (no) return "不得抵扣之進貨及費用";
+
+        return "待查";
+      }
+
+      // ===== 人工審核 =====
+      function commitDecision(decision){
+        if (!pending.length) return;
+
+        const invIdx = pending[cursor];
+        const inv = invoices.find(v => v.idx === invIdx);
+        const newNote = (decision === "deductible") ? "" : "不得抵扣之進貨及費用";
+
+        // 回寫到結構
+        const nextInv = invoices.map(v => v.idx === invIdx ? { ...v, buyerNote: newNote } : v);
+        setInvoices(nextInv);
+
+        // 新關鍵字（若輸入）
+        const kw = newKeyword.trim();
+        if (kw) {
+          const rule = {
+            customerId: companyId,
+            deductable: (decision === "deductible") ? "Yes" : "No",
+            sellerId: includeSellerId ? inv.sellerId : "",
+            keyword: kw,
+          };
+          setRefData(prev => [...prev, rule]);
+          setAddedRules(prev => [...prev, rule]);
+          // 無 blocking：失敗也不中斷流程
+          addRefRuleToN8n(rule).catch(console.error);
+
+          setNewKeyword("");
+          setIncludeSellerId(false);
+        }
+
+        // 下一筆
+        if (cursor < pending.length - 1) {
+          setCursor(c => c + 1);
+        } else {
+          setStep(5);
+        }
+      }
+
+      async function finalize(){
+        // 再次嘗試補送一次新增規則（若先前有失敗）
+        for (const r of addedRules) {
+          try { await addRefRuleToN8n(r); } catch(e){ console.error(e); }
         }
         setStep(6);
-      };
+      }
 
-      // --- 匯出 Excel ---
-      const downloadResults = () => {
+      // ===== 匯出（保留原始欄位順序，只覆蓋「買受人註記」欄位） =====
+      function downloadExcel(){
+        // 找出「買受人註記」欄位在 Invoice 的 index（若找不到，採用 index 1 作為備援）
+        let buyerNoteCol = idxOf(invHeaders, ["買受人註記","buyerNote"], 1);
+
+        // 依「invoices 結構」把結果回寫到 invRowsAOA
+        const byIdx = new Map(invoices.map(v => [v.idx, v]));
+        const updatedInvRows = invRowsAOA.map((row, i) => {
+          const v = byIdx.get(i);
+          if (!v) return row.slice(); // 安全複製
+          const newRow = row.slice();
+          newRow[buyerNoteCol] = v.buyerNote; // "" / "不得抵扣之進貨及費用" / "待查"
+          return newRow;
+        });
+
+        // 建立 Excel
         const wb = XLSX.utils.book_new();
 
-        // Invoice 工作表 (保持原始順序，更新「買受人註記」欄位)
-        const invoiceSheetData = [
-          invoiceHeaders,
-          ...invoiceData.map(inv =>
-            invoiceHeaders.map(h => inv[h] !== undefined ? inv[h] : '')
-          )
+        // Invoice
+        const invAoa = [invHeaders, ...updatedInvRows];
+        const invWs = XLSX.utils.aoa_to_sheet(invAoa);
+        XLSX.utils.book_append_sheet(wb, invWs, "Invoice");
+
+        // Invoice_details（原樣回寫）
+        const detAoa = [detHeaders, ...detRowsAOA];
+        const detWs = XLSX.utils.aoa_to_sheet(detAoa);
+        XLSX.utils.book_append_sheet(wb, detWs, "Invoice_details");
+
+        const stamp = new Date().toISOString().slice(0,10);
+        XLSX.writeFile(wb, `${companyId}_${stamp}_reviewed.xlsx`);
+      }
+
+      // ===== 測試用：不需上傳檔案也能演練流程 =====
+      function loadDemo(){
+        // 造一個最小的 Invoice/Details AOA
+        const invH = ["發票號碼","買受人註記","格式代號","發票狀態","發票日期","買方統一編號","買方名稱","賣方統一編號","賣方名稱"];
+        const invR = [
+          ["AB12345678","","","","2025-08-01","87097348","某公司","27365925","某供應商"],
+          ["CD87654321","","","","2025-08-02","87097348","某公司","00000000","餐廳A"],
+          ["EF00000001","","","","2025-08-03","87097348","某公司","52003801","供應商B"],
         ];
-        const invoiceSheet = XLSX.utils.aoa_to_sheet(invoiceSheetData);
-        XLSX.utils.book_append_sheet(wb, invoiceSheet, "Invoice");
-
-        // Invoice_details 工作表
-        const detailsSheetData = [
-          detailsHeaders,
-          ...originalDetailsData.map(det =>
-            detailsHeaders.map(h => det[h] !== undefined ? det[h] : '')
-          )
+        const detH = ["發票號碼","發票日期","序號","品名","數量","單位","單價","金額"];
+        const detR = [
+          ["AB12345678","2025-08-01",1,"面膜-極潤",1,"盒",100,100],
+          ["AB12345678","2025-08-01",2,"防曬乳",1,"條",200,200],
+          ["CD87654321","2025-08-02",1,"餐飲消費",1,"次",500,500],
+          ["EF00000001","2025-08-03",1,"雜項",1,"項",50,50]
         ];
-        const detailsSheet = XLSX.utils.aoa_to_sheet(detailsSheetData);
-        XLSX.utils.book_append_sheet(wb, detailsSheet, "Invoice_details");
+        setCompanyId("87097348");
 
-        XLSX.writeFile(wb, `${companyId}_${new Date().toISOString().slice(0,10)}_reviewed.xlsx`);
-      };
+        setInvHeaders(invH);
+        setDetHeaders(detH);
+        setInvRowsAOA(invR);
+        setDetRowsAOA(detR);
 
-      // --- UI ---
+        // 結構
+        const invStruct = invR.map((r,i) => ({
+          idx:i,
+          row:r,
+          buyerNoteCol: 1,
+          invoiceNumber: toStr(r[0]),
+          sellerId: toStr(r[7]),
+          sellerName: toStr(r[8]),
+          buyerNote: toStr(r[1]),
+          items: [],
+        }));
+        const detStruct = detR.map((r,i) => ({
+          idx:i, row:r,
+          invoiceNumber: toStr(r[0]),
+          itemName: toStr(r[3]),
+        }));
+        setInvoices(invStruct);
+        setDetails(detStruct);
+
+        setRefData(fallbackRefData.filter(x => x.customerId === "87097348"));
+        setStep(3);
+        setTimeout(() => doCleaning(fallbackRefData.filter(x => x.customerId === "87097348")), 150);
+      }
+
+      // ===== UI =====
       return (
-        <div className="min-h-screen bg-gray-50 py-4">
-          <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-md p-6">
-            <div className="w-full bg-gray-200 h-1 mb-3">
-              <div className="bg-blue-500 h-1 transition-all duration-300" style={{ width: (step/6)*100+'%' }} />
-            </div>
+        <div className="container-narrow px-4 py-6">
+          <h1 className="text-xl font-bold mb-4">進項扣抵審核工具</h1>
 
-            {step === 1 && (
-              <div className="text-center">
-                <h2 className="text-lg font-bold mb-3">上傳發票檔案</h2>
-                <input type="file" accept=".xlsx" onChange={handleFileUpload} className="mb-4" />
-                {error && <p className="text-red-600 text-sm">{error}</p>}
-              </div>
-            )}
-
-            {step === 2 && <p className="text-center">正在載入參考資料...</p>}
-
-            {step === 3 && (
-              <div className="text-center">
-                <h2 className="text-lg font-bold mb-3">初步資料清理</h2>
-                <div className="w-full bg-gray-200 rounded-full h-2 mb-3">
-                  <div className="bg-blue-500 h-2 rounded-full" style={{ width: progress+'%' }} />
-                </div>
-                <p>{progress}%</p>
-              </div>
-            )}
-
-            {step === 4 && pendingReviews.length > 0 && (
-              <div>
-                <h2 className="font-bold mb-3">逐筆審核待查項目</h2>
-                <div className="border rounded p-3 mb-3">
-                  <p><strong>發票號碼：</strong>{pendingReviews[currentReviewIndex]["發票號碼"]}</p>
-                  <p><strong>賣方統編：</strong>{pendingReviews[currentReviewIndex]["賣方統編"]}</p>
-                  <p><strong>明細：</strong>{pendingReviews[currentReviewIndex].items.join(', ')}</p>
-                </div>
-                <input value={newKeyword} onChange={e => setNewKeyword(e.target.value)} placeholder="新增關鍵字" className="border p-2 w-full mb-2" />
-                <label className="block mb-2">
-                  <input type="checkbox" checked={includeSellerID} onChange={e => setIncludeSellerID(e.target.checked)} /> 包含賣方統編
-                </label>
-                <div className="flex gap-2">
-                  <button onClick={() => handleReviewDecision('deductible')} className="flex-1 bg-green-500 text-white py-2 rounded">可扣抵</button>
-                  <button onClick={() => handleReviewDecision('non-deductible')} className="flex-1 bg-red-500 text-white py-2 rounded">不可扣抵</button>
-                </div>
-              </div>
-            )}
-
-            {step === 5 && (
-              <div className="text-center">
-                <h2 className="text-lg font-bold mb-3">所有審核完成</h2>
-                <div className="flex flex-col gap-3">
-                  <button onClick={handleConfirmCompletion} className="bg-blue-500 text-white px-4 py-2 rounded">確認完成並送出 n8n</button>
-                  <button onClick={downloadResults} className="bg-green-500 text-white px-4 py-2 rounded">下載 Excel 結果</button>
-                </div>
-              </div>
-            )}
-
-            {step === 6 && <p className="text-center text-green-600">已完成，新增的規則已送出 n8n ✅</p>}
+          {/* 進度條 */}
+          <div className="w-full bg-gray-200 h-1 mb-4 rounded">
+            <div className="bg-blue-600 h-1 rounded transition-all" style={{ width: `${(step/6)*100}%` }} />
           </div>
+
+          {/* 錯誤訊息 */}
+          {error && (
+            <div className="mb-4 p-3 rounded bg-red-50 border border-red-200 text-sm text-red-800">
+              {error}
+            </div>
+          )}
+
+          {/* Step 1: 上傳 */}
+          {step === 1 && (
+            <div className="bg-white rounded-xl shadow p-5">
+              <p className="text-sm text-gray-600 mb-3">
+                上傳包含 <span className="mono">Invoice</span> 與 <span className="mono">Invoice_details</span> 的 Excel（檔名前 8 碼為客戶統編）。
+              </p>
+              <div className="flex items-center gap-3">
+                <input type="file" accept=".xlsx" onChange={onUpload} className="block text-sm"/>
+                <button onClick={loadDemo} className="px-3 py-2 text-sm bg-gray-100 rounded hover:bg-gray-200">使用測試資料</button>
+              </div>
+              {companyId && <p className="text-xs text-gray-500 mt-3">偵測到統編：<span className="mono">{companyId}</span></p>}
+            </div>
+          )}
+
+          {/* Step 2: 連 n8n */}
+          {step === 2 && (
+            <div className="bg-white rounded-xl shadow p-6 text-center">
+              <div className="animate-spin mx-auto mb-3 rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+              <p className="text-sm text-gray-700">正在載入 {companyId} 的參考規則...</p>
+            </div>
+          )}
+
+          {/* Step 3: 自動清理 */}
+          {step === 3 && (
+            <div className="bg-white rounded-xl shadow p-6 text-center">
+              <h2 className="font-semibold mb-3">初步資料清理</h2>
+              <div className="w-full bg-gray-200 rounded-full h-2 mb-3">
+                <div className="bg-blue-600 h-2 rounded-full" style={{ width: `${progress}%` }} />
+              </div>
+              <p className="text-sm text-gray-600">{progress}%</p>
+            </div>
+          )}
+
+          {/* Step 4: 逐筆審核 */}
+          {step === 4 && (
+            <div className="bg-white rounded-xl shadow p-5">
+              <h2 className="font-semibold mb-4">逐筆審核（待查）</h2>
+              {pending.length === 0 ? (
+                <p className="text-sm text-gray-600">沒有待查項目。</p>
+              ) : (
+                <>
+                  {(() => {
+                    const invIdx = pending[cursor];
+                    const v = invoices.find(x => x.idx === invIdx);
+                    if (!v) return <p className="text-sm text-gray-600">資料錯誤，找不到對應發票。</p>;
+                    return (
+                      <div className="space-y-2 mb-4 text-sm">
+                        <p><b>發票號碼：</b><span className="mono">{v.invoiceNumber}</span></p>
+                        <p><b>賣方統編：</b><span className="mono">{v.sellerId || "-"}</span></p>
+                        <p><b>明細：</b>{v.items.length ? v.items.join("、") : "-"}</p>
+                      </div>
+                    );
+                  })()}
+
+                  <div className="mb-3">
+                    <input
+                      value={newKeyword}
+                      onChange={(e)=>setNewKeyword(e.target.value)}
+                      placeholder="新增關鍵字（逗號分隔可多筆）"
+                      className="w-full border rounded px-3 py-2 text-sm"
+                    />
+                    <label className="text-sm mt-2 inline-flex items-center gap-2">
+                      <input type="checkbox" checked={includeSellerId} onChange={(e)=>setIncludeSellerId(e.target.checked)} />
+                      同步包含賣方統編
+                    </label>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button onClick={()=>commitDecision("deductible")} className="flex-1 rounded bg-green-600 text-white py-2 text-sm hover:bg-green-700">可扣抵</button>
+                    <button onClick={()=>commitDecision("non-deductible")} className="flex-1 rounded bg-red-600 text-white py-2 text-sm hover:bg-red-700">不可扣抵</button>
+                  </div>
+
+                  <p className="text-xs text-gray-500 mt-3">進度：{cursor+1}/{pending.length}</p>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Step 5: 完成確認 */}
+          {step === 5 && (
+            <div className="bg-white rounded-xl shadow p-5 text-center space-y-3">
+              <h2 className="font-semibold">審核完成</h2>
+              <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                <button onClick={finalize} className="px-4 py-2 rounded bg-blue-600 text-white text-sm hover:bg-blue-700">確認完成並送出 n8n</button>
+                <button onClick={downloadExcel} className="px-4 py-2 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-700">下載 Excel 結果</button>
+              </div>
+
+              {/* 小型診斷區：可快速確認數量是否正確 */}
+              <div className="mt-4 p-3 bg-gray-50 rounded border text-left text-xs text-gray-700">
+                <p>總發票：{invoices.length}，待查：{invoices.filter(v=>v.buyerNote==="待查").length}，可扣抵：{invoices.filter(v=>v.buyerNote==="").length}，不可扣抵：{invoices.filter(v=>v.buyerNote==="不得抵扣之進貨及費用").length}</p>
+                <p>規則數（目前記憶）：{refData.length}，本次新增規則：{addedRules.length}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Step 6: 完成 */}
+          {step === 6 && (
+            <div className="bg-white rounded-xl shadow p-6 text-center">
+              <p className="text-green-600 font-semibold">✅ 已完成，新增規則已送出 n8n。</p>
+              <button onClick={downloadExcel} className="mt-3 px-4 py-2 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-700">再次下載 Excel 結果</button>
+            </div>
+          )}
         </div>
       );
     }
 
-    ReactDOM.createRoot(document.getElementById('root')).render(<InvoiceReviewSystem />);
+    ReactDOM.createRoot(document.getElementById("root")).render(<InvoiceReviewApp />);
   </script>
 </body>
 </html>
