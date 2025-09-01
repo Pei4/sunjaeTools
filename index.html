@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>進項扣抵審核工具（最終修正版）</title>
+  <title>進項扣抵審核工具（flushSync 修正版）</title>
   <!-- 開發用 CDN（若要 Production 最佳化，建議改打包編譯） -->
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -23,6 +23,7 @@
 
   <script type="text/babel">
     const { useState, useMemo } = React;
+    const { flushSync } = ReactDOM;
 
     // ========= n8n API 設定 =========
     const N8N_BASE = "https://pei4.zeabur.app";
@@ -45,7 +46,6 @@
         const customerId = str(obj.customerId ?? obj.customerID ?? obj.cid ?? obj.customer ?? "");
         const sellerId   = str(obj.sellerId ?? obj.sellerID ?? obj.seller ?? obj.vendorId ?? "");
         const keyword    = str(obj.keyword ?? obj.kw ?? obj.key ?? "");
-        // 常見命名：deductable / deductible / allowed / isAllowed / canDeduct
         let ded = obj.deductable ?? obj.deductible ?? obj.allowed ?? obj.isAllowed ?? obj.canDeduct ?? "";
         ded = str(ded).toLowerCase();
         const yes = (ded === "yes" || ded === "y" || ded === "true" || ded === "1");
@@ -58,7 +58,6 @@
     async function fetchRefDataFromN8n(customerId) {
       assertKey();
       const url = `${N8N_BASE}/webhook/get-ref-data?customerId=${encodeURIComponent(customerId)}`;
-      console.log("[fetchRefDataFromN8n] GET", url);
       const res = await fetch(url, {
         method: "GET",
         headers: { "X-API-Key": N8N_KEY }, // 不帶 Content-Type，避免預檢 CORS
@@ -66,45 +65,24 @@
         credentials: "omit",
       });
       const text = await res.text().catch(()=> "");
-      if (!res.ok) {
-        console.error("[fetchRefDataFromN8n] HTTP", res.status, text);
-        throw new Error(`n8n 讀取失敗 ${res.status} ${text}`);
-      }
-      try {
-        const json = JSON.parse(text);
-        console.log("[fetchRefDataFromN8n] raw:", json);
-        return json;
-      } catch (e) {
-        console.warn("[fetchRefDataFromN8n] 非 JSON 回應：", text);
-        return [];
-      }
+      if (!res.ok) throw new Error(`n8n 讀取失敗 ${res.status} ${text}`);
+      try { return JSON.parse(text); } catch { return []; }
     }
 
     async function addRefRuleToN8n(rule) {
       assertKey();
       const url = `${N8N_BASE}/webhook/add-ref-data`;
-      console.log("[addRefRuleToN8n] POST", url, rule);
       const res = await fetch(url, {
         method: "POST",
         headers: { "X-API-Key": N8N_KEY, "Content-Type": "application/json" },
         body: JSON.stringify(rule),
       });
       const text = await res.text().catch(()=> "");
-      if (!res.ok) {
-        console.error("[addRefRuleToN8n] HTTP", res.status, text);
-        throw new Error(`n8n 寫入失敗 ${res.status} ${text}`);
-      }
-      try {
-        const json = JSON.parse(text);
-        console.log("[addRefRuleToN8n] resp:", json);
-        return json;
-      } catch {
-        console.log("[addRefRuleToN8n] resp text:", text);
-        return text;
-      }
+      if (!res.ok) throw new Error(`n8n 寫入失敗 ${res.status} ${text}`);
+      try { return JSON.parse(text); } catch { return text; }
     }
 
-    // ========= 共同小工具 =========
+    // ========= 小工具 =========
     function str(x){ return (x==null? "": String(x)).trim(); }
     function idxOf(headers, candidates, fallbackIdx = -1) {
       const set = new Set(headers.map(String));
@@ -212,30 +190,26 @@
             return;
           }
           const cid = file.name.slice(0,8);
-          setCompanyId(cid);
-          console.log("[Upload] file:", file.name, "companyId:", cid);
 
+          // 先把 Headers/AOA 與 結構「同步」寫入
           const inv = await readSheet(file, "Invoice");
           const det = await readSheet(file, "Invoice_details");
-          console.log("[Upload] Invoice headers:", inv.headers);
-          console.log("[Upload] Details headers:", det.headers);
 
-          setInvHeaders(inv.headers);
-          setDetHeaders(det.headers);
-          setInvRowsAOA(inv.rows);
-          setDetRowsAOA(det.rows);
+          flushSync(()=> {
+            setCompanyId(cid);
+            setInvHeaders(inv.headers);
+            setDetHeaders(det.headers);
+            setInvRowsAOA(inv.rows);
+            setDetRowsAOA(det.rows);
+            setInvoices(buildInvoicesFromAOA(inv.headers, inv.rows));
+            setDetails(buildDetailsFromAOA(det.headers, det.rows));
+            setError("");
+          });
 
-          // 先用 AOA 建立結構（避免之後清理時拿到空狀態）
-          const invoicesStruct = buildInvoicesFromAOA(inv.headers, inv.rows);
-          const detailsStruct  = buildDetailsFromAOA(det.headers, det.rows);
-          console.log("[Upload] invoices:", invoicesStruct.length, "details:", detailsStruct.length);
-          setInvoices(invoicesStruct);
-          setDetails(detailsStruct);
-
+          // 再切換步驟
           setStep(2);
           setTimeout(() => loadRef(cid), 100);
         }catch(err){
-          console.error(err);
           setError(err.message || String(err));
         }
       }
@@ -243,6 +217,7 @@
       // 測試按鈕（無需上傳就能演練）
       function loadDemo(){
         setError("");
+
         const invH = ["發票號碼","買受人註記","格式代號","發票狀態","發票日期","買方統一編號","買方名稱","賣方統一編號","賣方名稱"];
         const invR = [
           ["AB12345678","","","","2025-08-01","87097348","某公司","27365925","某供應商"],
@@ -256,15 +231,17 @@
           ["CD87654321","2025-08-02",1,"餐飲消費",1,"次",500,500],
           ["EF00000001","2025-08-03",1,"雜項",1,"項",50,50]
         ];
-        setCompanyId("87097348");
-        setInvHeaders(invH); setDetHeaders(detH);
-        setInvRowsAOA(invR); setDetRowsAOA(detR);
 
-        const invoicesStruct = buildInvoicesFromAOA(invH, invR);
-        const detailsStruct  = buildDetailsFromAOA(detH, detR);
-        setInvoices(invoicesStruct);
-        setDetails(detailsStruct);
+        // 先同步寫入所有狀態
+        flushSync(()=> {
+          setCompanyId("87097348");
+          setInvHeaders(invH); setDetHeaders(detH);
+          setInvRowsAOA(invR); setDetRowsAOA(detR);
+          setInvoices(buildInvoicesFromAOA(invH, invR));
+          setDetails(buildDetailsFromAOA(detH, detR));
+        });
 
+        // 模擬從 n8n 取得的規則
         const demoRules = [
           { customerId:"87097348", deductable:"Yes", sellerId:"27365925", keyword:"面膜" },
           { customerId:"87097348", deductable:"Yes", sellerId:"27365925", keyword:"防曬" },
@@ -280,17 +257,13 @@
 
       async function loadRef(cid){
         try{
-          console.log("[loadRef] fetching n8n rules for", cid);
           const raw = await fetchRefDataFromN8n(cid);
           setRawRefResponse(raw);
           const rules = normalizeRefArray(raw).filter(r => r.customerId === cid || r.customerId === "");
-          console.log("[loadRef] normalized rules:", rules);
           setRefRules(rules);
           setStep(3);
-          // doCleaning 內部已具備從 AOA 重建的保險
           setTimeout(()=>doCleaning(rules), 50);
         }catch(err){
-          console.error("[loadRef] error:", err);
           setError(err.message || String(err));
           setRawRefResponse({ error: err.message });
           setRefRules([]);
@@ -299,7 +272,7 @@
         }
       }
 
-      // ===== 初步清理（穩健版：若 state 未就緒，從 AOA 重建） =====
+      // ===== 初步清理（使用 flushSync，並在必要時從 AOA 重建） =====
       function doCleaning(refs){
         setProgress(0);
 
@@ -330,21 +303,19 @@
                 return { ...v, items, buyerNote: note };
               });
 
-              setInvoices(next);
-              const pend = next.filter(x=> x.buyerNote==="待查").map(x=>x.idx);
-              setPending(pend);
-              setCursor(0);
+              // 先同步更新，再換步驟
+              flushSync(()=> {
+                setInvoices(next);
+                setPending(next.filter(x=> x.buyerNote==="待查").map(x=>x.idx));
+                setCursor(0);
+              });
 
-              // 等狀態寫入排隊後再切換步驟，避免讀到舊值
-              setTimeout(()=> {
-                setStep(pend.length ? 4 : 5);
-              }, 0);
-
+              setStep(next.some(x=>x.buyerNote==="待查") ? 4 : 5);
               return 100;
             }
             return p + 20;
           });
-        }, 150);
+        }, 120);
       }
 
       function judge(sellerId, items, refs){
@@ -379,7 +350,9 @@
         if (!v) return;
 
         const newNote = decision==="yes" ? "" : "不得抵扣之進貨及費用";
-        setInvoices(prev => prev.map(x => x.idx===invIdx ? { ...x, buyerNote:newNote } : x));
+        flushSync(()=> {
+          setInvoices(prev => prev.map(x => x.idx===invIdx ? { ...x, buyerNote:newNote } : x));
+        });
 
         const kw = newKeyword.trim();
         if (kw){
@@ -391,7 +364,7 @@
           };
           setAddedRules(prev=>[...prev, rule]);
           setRefRules(prev=>[...prev, rule]);
-          addRefRuleToN8n(rule).catch(err=> console.error("[addRefRuleToN8n] fail (non-blocking):", err));
+          addRefRuleToN8n(rule).catch(()=>{});
           setNewKeyword("");
           setIncludeSellerId(false);
         }
@@ -402,7 +375,7 @@
 
       async function finalize(){
         for (const r of addedRules) {
-          try { await addRefRuleToN8n(r); } catch(e){ console.error(e); }
+          try { await addRefRuleToN8n(r); } catch(e){}
         }
         setStep(6);
       }
