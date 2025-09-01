@@ -53,6 +53,8 @@
       const [invoiceDetailsData, setInvoiceDetailsData] = useState([]);
       const [originalInvoiceData, setOriginalInvoiceData] = useState([]);
       const [originalDetailsData, setOriginalDetailsData] = useState([]);
+      const [invoiceHeaders, setInvoiceHeaders] = useState([]);
+      const [detailsHeaders, setDetailsHeaders] = useState([]);
       const [refData, setRefData] = useState([]);
       const [pendingReviews, setPendingReviews] = useState([]);
       const [currentReviewIndex, setCurrentReviewIndex] = useState(0);
@@ -63,6 +65,7 @@
       const [error, setError] = useState('');
       const [newlyAddedRefData, setNewlyAddedRefData] = useState([]);
 
+      // fallback 測試資料
       const fallbackRefData = [
         { customerId: '87097348', deductable: 'Yes', sellerId: '27365925', keyword: '面膜' },
         { customerId: '87097348', deductable: 'Yes', sellerId: '27365925', keyword: '防曬' },
@@ -89,10 +92,12 @@
         try {
           const invoiceSheetData = await readExcelSheet(file, 'Invoice');
           const detailsSheetData = await readExcelSheet(file, 'Invoice_details');
-          setOriginalInvoiceData(invoiceSheetData);
-          setOriginalDetailsData(detailsSheetData);
-          setInvoiceData(invoiceSheetData);
-          setInvoiceDetailsData(detailsSheetData);
+          setOriginalInvoiceData(invoiceSheetData.data);
+          setInvoiceHeaders(invoiceSheetData.headers);
+          setOriginalDetailsData(detailsSheetData.data);
+          setDetailsHeaders(detailsSheetData.headers);
+          setInvoiceData(invoiceSheetData.data);
+          setInvoiceDetailsData(detailsSheetData.data);
           setStep(2);
           setTimeout(() => searchRefData(extractedCompanyId), 500);
         } catch (err) {
@@ -113,24 +118,16 @@
               }
               const worksheet = workbook.Sheets[sheetName];
               const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+              const headers = jsonData[0] || [];
               const rows = jsonData.slice(1);
-              if (sheetName === 'Invoice') {
-                resolve(rows.map((row, i) => ({
-                  invoiceNumber: row[0] || '',
-                  buyerNote: row[1] || '',
-                  sellerId: String(row[7] || ''),
-                  sellerName: row[8] || '',
-                  originalRow: row,
-                  rowIndex: i + 2
-                })).filter(item => item.invoiceNumber));
-              } else {
-                resolve(rows.map((row, i) => ({
-                  invoiceNumber: row[0] || '',
-                  itemName: row[3] || '',
-                  originalRow: row,
-                  rowIndex: i + 2
-                })).filter(item => item.invoiceNumber && item.itemName));
-              }
+
+              const formatted = rows.map((row, i) => {
+                const obj = {};
+                headers.forEach((h, j) => { obj[h] = row[j] || ''; });
+                obj.rowIndex = i + 2;
+                return obj;
+              }).filter(item => Object.values(item).some(v => v !== ''));
+              resolve({ headers, data: formatted });
             } catch (err) { reject(err); }
           };
           reader.onerror = () => reject(new Error('檔案讀取失敗'));
@@ -166,23 +163,23 @@
             if (prev >= 100) {
               clearInterval(interval);
               setIsProcessing(false);
-              const cleanedData = invoiceData.map(invoice => {
-                const invoiceItems = invoiceDetailsData
-                  .filter(d => d.invoiceNumber === invoice.invoiceNumber)
-                  .map(d => d.itemName);
-                let buyerNote = '待查';
+              const cleanedData = originalInvoiceData.map(invoice => {
+                const invoiceItems = originalDetailsData
+                  .filter(d => d["發票號碼"] === invoice["發票號碼"])
+                  .map(d => d["品名"]);
+                let note = '待查';
                 if (currentRefData.some(ref => ref.deductable === 'Yes' &&
-                    (ref.sellerId === invoice.sellerId || invoiceItems.some(it => it.includes(ref.keyword))))) {
-                  buyerNote = '';
+                    (ref.sellerId === invoice["賣方統編"] || invoiceItems.some(it => it.includes(ref.keyword))))) {
+                  note = '';
                 } else if (currentRefData.some(ref => ref.deductable === 'No' &&
-                    (ref.sellerId === invoice.sellerId || invoiceItems.some(it => it.includes(ref.keyword))))) {
-                  buyerNote = '不得抵扣之進貨及費用';
+                    (ref.sellerId === invoice["賣方統編"] || invoiceItems.some(it => it.includes(ref.keyword))))) {
+                  note = '不得抵扣之進貨及費用';
                 }
-                return { ...invoice, buyerNote, items: invoiceItems };
+                return { ...invoice, "買受人註記": note, items: invoiceItems };
               });
               setInvoiceData(cleanedData);
-              setPendingReviews(cleanedData.filter(i => i.buyerNote === '待查'));
-              setStep(cleanedData.some(i => i.buyerNote === '待查') ? 4 : 5);
+              setPendingReviews(cleanedData.filter(i => i["買受人註記"] === '待查'));
+              setStep(cleanedData.some(i => i["買受人註記"] === '待查') ? 4 : 5);
               return 100;
             }
             return prev + 20;
@@ -194,13 +191,13 @@
       const handleReviewDecision = (decision) => {
         const currentInvoice = pendingReviews[currentReviewIndex];
         const updatedData = invoiceData.map(inv =>
-          inv.invoiceNumber === currentInvoice.invoiceNumber
-            ? { ...inv, buyerNote: decision === 'deductible' ? '' : '不得抵扣之進貨及費用' }
+          inv["發票號碼"] === currentInvoice["發票號碼"]
+            ? { ...inv, "買受人註記": decision === 'deductible' ? '' : '不得抵扣之進貨及費用' }
             : inv
         );
         setInvoiceData(updatedData);
         if (newKeyword.trim()) {
-          const newRule = { customerId: companyId, deductable: decision === 'deductible' ? 'Yes' : 'No', sellerId: includeSellerID ? currentInvoice.sellerId : '', keyword: newKeyword.trim() };
+          const newRule = { customerId: companyId, deductable: decision === 'deductible' ? 'Yes' : 'No', sellerId: includeSellerID ? currentInvoice["賣方統編"] : '', keyword: newKeyword.trim() };
           setRefData(prev => [...prev, newRule]);
           setNewlyAddedRefData(prev => [...prev, newRule]);
           addRefRuleToN8n(newRule).catch(console.error);
@@ -211,11 +208,39 @@
         else setStep(5);
       };
 
+      // --- 確認完成 ---
       const handleConfirmCompletion = async () => {
         for (const rule of newlyAddedRefData) {
           try { await addRefRuleToN8n(rule); } catch (e) { console.error(e); }
         }
         setStep(6);
+      };
+
+      // --- 匯出 Excel ---
+      const downloadResults = () => {
+        const wb = XLSX.utils.book_new();
+
+        // Invoice 工作表 (保持原始順序，更新「買受人註記」欄位)
+        const invoiceSheetData = [
+          invoiceHeaders,
+          ...invoiceData.map(inv =>
+            invoiceHeaders.map(h => inv[h] !== undefined ? inv[h] : '')
+          )
+        ];
+        const invoiceSheet = XLSX.utils.aoa_to_sheet(invoiceSheetData);
+        XLSX.utils.book_append_sheet(wb, invoiceSheet, "Invoice");
+
+        // Invoice_details 工作表
+        const detailsSheetData = [
+          detailsHeaders,
+          ...originalDetailsData.map(det =>
+            detailsHeaders.map(h => det[h] !== undefined ? det[h] : '')
+          )
+        ];
+        const detailsSheet = XLSX.utils.aoa_to_sheet(detailsSheetData);
+        XLSX.utils.book_append_sheet(wb, detailsSheet, "Invoice_details");
+
+        XLSX.writeFile(wb, `${companyId}_reviewed.xlsx`);
       };
 
       // --- UI ---
@@ -250,8 +275,8 @@
               <div>
                 <h2 className="font-bold mb-3">逐筆審核待查項目</h2>
                 <div className="border rounded p-3 mb-3">
-                  <p><strong>發票號碼：</strong>{pendingReviews[currentReviewIndex].invoiceNumber}</p>
-                  <p><strong>賣方統編：</strong>{pendingReviews[currentReviewIndex].sellerId}</p>
+                  <p><strong>發票號碼：</strong>{pendingReviews[currentReviewIndex]["發票號碼"]}</p>
+                  <p><strong>賣方統編：</strong>{pendingReviews[currentReviewIndex]["賣方統編"]}</p>
                   <p><strong>明細：</strong>{pendingReviews[currentReviewIndex].items.join(', ')}</p>
                 </div>
                 <input value={newKeyword} onChange={e => setNewKeyword(e.target.value)} placeholder="新增關鍵字" className="border p-2 w-full mb-2" />
@@ -268,7 +293,10 @@
             {step === 5 && (
               <div className="text-center">
                 <h2 className="text-lg font-bold mb-3">所有審核完成</h2>
-                <button onClick={handleConfirmCompletion} className="bg-blue-500 text-white px-4 py-2 rounded">確認完成並送出 n8n</button>
+                <div className="flex flex-col gap-3">
+                  <button onClick={handleConfirmCompletion} className="bg-blue-500 text-white px-4 py-2 rounded">確認完成並送出 n8n</button>
+                  <button onClick={downloadResults} className="bg-green-500 text-white px-4 py-2 rounded">下載 Excel 結果</button>
+                </div>
               </div>
             )}
 
