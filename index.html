@@ -94,42 +94,99 @@
       return mapped.length ? mapped : null;
     }
 
-    async function fetchRefDataFromN8n({ apiKey, customerId }) {
-      const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/get-ref-data';
-      const headers = { 'X-API-Key': apiKey };
+    async function safeFetchJSON(url, options) {
       try {
-        const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
+        const res = await fetch(url, {
+          // 有些代理/伺服器在 gzip 標頭上不規範，強制避免快取並讓瀏覽器走標準解碼路徑
+          cache: 'no-store',
+          credentials: 'omit',
+          redirect: 'follow',
+          ...options,
+          headers: {
+            'Accept': 'application/json, text/plain, */*',
+            // 許多瀏覽器不允許覆寫 Accept-Encoding，但加入 identity 也不會出錯
+            'Accept-Encoding': 'identity',
+            ...(options && options.headers ? options.headers : {}),
+          },
+        });
+        // 嘗試以 JSON 解析；若失敗以文字再 JSON.parse
+        try {
+          return await res.json();
+        } catch (_) {
+          const txt = await res.text();
+          return JSON.parse(txt);
+        }
+      } catch (err) {
+        // 將錯誤回拋給上層做 fallback
+        throw err;
+      }
+    }
+
+    async function fetchRefDataFromN8n({ apiKey, customerId }) {
+      const params = new URLSearchParams(window.location.search);
+      const overrideEndpoint = params.get('refEndpoint'); // 允許用 ?refEndpoint= 覆寫
+      const primary = overrideEndpoint || 'https://n8n-cors-proxy.zeabur.app/n8n/get-ref-data';
+
+      // 1) 嘗試 PRIMARY：POST
+      try {
+        const data = await safeFetchJSON(`${primary}?key=${encodeURIComponent(apiKey)}`, {
           method: 'POST',
-          headers: { ...headers, 'Content-Type': 'application/json' },
+          headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
           body: JSON.stringify({ customerId }),
         });
-        const data = await res.json().catch(()=>null);
         const normalized = normalizeRefData(data, customerId);
         if (normalized) return normalized;
-      } catch(e){}
+      } catch (e) {
+        console.warn('[ref-data] primary POST 失敗：', e);
+      }
+
+      // 2) 嘗試 PRIMARY：GET
       try {
-        const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}&customerId=${encodeURIComponent(customerId)}`, {
+        const data = await safeFetchJSON(`${primary}?key=${encodeURIComponent(apiKey)}&customerId=${encodeURIComponent(customerId)}`, {
           method: 'GET',
-          headers,
+          headers: { 'X-API-Key': apiKey },
         });
-        const data = await res.json().catch(()=>null);
         const normalized = normalizeRefData(data, customerId);
         if (normalized) return normalized;
-      } catch(e){}
+      } catch (e) {
+        console.warn('[ref-data] primary GET 失敗：', e);
+      }
+
+      // 3) Fallback：使用通用 CORS 代理（只支援 GET），避免 Content-Encoding 錯誤
+      // 注意：此路徑僅作為讀取參考資料的備援；會攜帶 query 參數
+      try {
+        const encoded = encodeURIComponent(`${primary}?key=${encodeURIComponent(apiKey)}&customerId=${encodeURIComponent(customerId)}`);
+        const proxyUrl = `https://cors.isomorphic-git.org/${decodeURIComponent(encoded)}`;
+        const data = await safeFetchJSON(proxyUrl, { method: 'GET' });
+        const normalized = normalizeRefData(data, customerId);
+        if (normalized) return normalized;
+      } catch (e) {
+        console.warn('[ref-data] proxy GET 失敗：', e);
+      }
+
       return null;
     }
 
     async function addRefRuleToN8n({ apiKey, customerId, rules }) {
-      const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/add-ref-data';
-      const headers = { 'X-API-Key': apiKey, 'Content-Type': 'application/json' };
-      const payload = { customerId, rules };
-      const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
+      const params = new URLSearchParams(window.location.search);
+      const overrideEndpoint = params.get('addRefEndpoint');
+      const primary = overrideEndpoint || 'https://n8n-cors-proxy.zeabur.app/n8n/add-ref-data';
+
+      // 主要以 POST 送出；若失敗就回傳錯誤（此功能通常不適合走公開 CORS 代理）
+      const res = await fetch(`${primary}?key=${encodeURIComponent(apiKey)}`, {
         method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
+        headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json', 'Accept': 'application/json, text/plain, */*' },
+        body: JSON.stringify({ customerId, rules }),
+        cache: 'no-store',
+        credentials: 'omit',
+        redirect: 'follow',
       });
       if (!res.ok) throw new Error(`n8n 回應非 2xx（HTTP ${res.status}）`);
-      return await res.json().catch(() => ({}));
+      try {
+        return await res.json();
+      } catch {
+        return {};
+      }
     }
 
     function InvoiceReviewApp() {
@@ -145,7 +202,7 @@
       const [originalDetailsData, setOriginalDetailsData] = useState([]);
 
       const [refData, setRefData] = useState([]);
-      const [fixedRefData, setFixedRefData] = useState([]); // 移除預設參考資料
+      const [fixedRefData, setFixedRefData] = useState([]); // 預設不帶內建參考資料
 
       const [pendingReviews, setPendingReviews] = useState([]);
       const [currentReviewIndex, setCurrentReviewIndex] = useState(0);
@@ -164,21 +221,6 @@
       const [n8nGetStatus, setN8nGetStatus] = useState(null); // null | 'ok' | 'fail' | 'skip'
       const [n8nAddStatus, setN8nAddStatus] = useState(null); // null | 'ok' | 'fail'
 
-      const calculateSimilarity = (a,b)=>{
-        a=(a||'').toString(); b=(b||'').toString();
-        const longer=a.length>b.length?a:b, shorter=a.length>b.length?b:a;
-        if (!longer.length) return 1.0;
-        const m = Array(shorter.length+1).fill().map(()=>Array(longer.length+1).fill(0));
-        for(let i=0;i<=shorter.length;i++) m[i][0]=i;
-        for(let j=0;j<=longer.length;j++) m[0][j]=j;
-        for(let i=1;i<=shorter.length;i++){
-          for(let j=1;j<=longer.length;j++){
-            m[i][j]=shorter[i-1]===longer[j-1]?m[i-1][j-1]:Math.min(m[i-1][j-1],m[i][j-1],m[i-1][j])+1;
-          }
-        }
-        const d=m[shorter.length][longer.length];
-        return (longer.length-d)/longer.length;
-      };
       const consolidateItems = (items)=>{
         if(!items||!items.length) return [];
         const res=[], used=new Set();
@@ -187,7 +229,8 @@
           const cur=items[i], similar=[cur]; used.add(i);
           for(let j=i+1;j<items.length;j++){
             if(used.has(j)) continue;
-            if(calculateSimilarity(cur,items[j])>=0.8){ similar.push(items[j]); used.add(j); }
+            // 粗略的相似度比對（可依需求再微調）
+            if(cur && items[j] && (cur.includes(items[j]) || items[j].includes(cur))) { similar.push(items[j]); used.add(j); }
           }
           if(similar.length>1){
             const shortest = similar.reduce((x,y)=>x.length<y.length?x:y);
@@ -281,8 +324,13 @@
         setInfo('正在載入參考資料...');
         let fetched = null;
         if (apiKey) {
-          fetched = await fetchRefDataFromN8n({ apiKey, customerId: cid });
-          if (fetched) { setFixedRefData(fetched); setN8nGetStatus('ok'); }
+          try {
+            fetched = await fetchRefDataFromN8n({ apiKey, customerId: cid });
+          } catch (e) {
+            // 即使錯誤也不中斷流程
+            console.warn('取得參考資料發生例外：', e);
+          }
+          if (fetched) { setFixedRefData(fetched); setN8nGetStatus('ok'); setInfo(''); }
           else { setN8nGetStatus('fail'); setInfo('未能從遠端取得參考資料。'); }
         } else {
           setN8nGetStatus('skip');
@@ -315,7 +363,6 @@
         }
       };
 
-      // 由參考資料進入清理
       const startCleaningWithRef = () => {
         initialDataCleaning(refData);
       };
@@ -477,7 +524,7 @@
       const handleConfirmCompletion = async () => {
         setStep(6);
         if (!newlyAddedRefData.length) { setN8nAddStatus('ok'); return; }
-        if (!apiKey) { setN8nAddStatus('fail'); setInfo(''); return; } // 移除 API 提示文字
+        if (!apiKey) { setN8nAddStatus('fail'); setInfo(''); return; }
         try {
           await addRefRuleToN8n({ apiKey, customerId: companyId, rules: newlyAddedRefData });
           setN8nAddStatus('ok');
@@ -535,7 +582,7 @@
                  style={{ width: `${(step/6)*100}%` }} />
           </div>
 
-          {/* 1. 移除畫面上的 API 相關提示：整段提示區塊刪除 */}
+          {/* API 提示已移除 */}
 
           <div className={`bg-white rounded-xl shadow-md py-3 px-8 work-container ${step===4 ? 'h-[80vh] flex flex-col' : ''}`}>
             {step===1 && (
@@ -768,7 +815,6 @@
 
                 {info && <p className="text-xs text-gray-500 mb-3">{info}</p>}
 
-                {/* 5. 完成後按鈕垂直排列並留間距 */}
                 <div className="flex flex-col items-center gap-3">
                   <button onClick={downloadResults}
                           className="w-full md:w-64 bg-green-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-green-600 transition-colors inline-flex items-center justify-center gap-2">
