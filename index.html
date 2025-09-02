@@ -95,7 +95,7 @@
     }
 
     async function fetchRefDataFromN8n({ apiKey, customerId }) {
-      const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/get-ref-data';
+      const endpoint = 'https://n8n-cors-proxy.zeabur.app/get-ref-data';
       const headers = { 'X-API-Key': apiKey };
       try {
         const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
@@ -120,7 +120,7 @@
     }
 
     async function addRefRuleToN8n({ apiKey, customerId, rules }) {
-      const endpoint = 'n8n-cors-proxy.zeabur.app/n8n/add-ref-data';
+      const endpoint = 'n8n-cors-proxy.zeabur.app/add-ref-data';
       const headers = { 'X-API-Key': apiKey, 'Content-Type': 'application/json' };
       const payload = { customerId, rules };
       const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
