@@ -25,7 +25,6 @@
       }
       add('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js', function(){
         if (!window.XLSX) {
-          // 若例外狀況：onload 仍沒有掛上 XLSX，再嘗試 unpkg
           add('https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js', function(){
             if (!window.XLSX) {
               console.error('無法載入 XLSX 函式庫。');
@@ -94,99 +93,42 @@
       return mapped.length ? mapped : null;
     }
 
-    async function safeFetchJSON(url, options) {
-      try {
-        const res = await fetch(url, {
-          // 有些代理/伺服器在 gzip 標頭上不規範，強制避免快取並讓瀏覽器走標準解碼路徑
-          cache: 'no-store',
-          credentials: 'omit',
-          redirect: 'follow',
-          ...options,
-          headers: {
-            'Accept': 'application/json, text/plain, */*',
-            // 許多瀏覽器不允許覆寫 Accept-Encoding，但加入 identity 也不會出錯
-            'Accept-Encoding': 'identity',
-            ...(options && options.headers ? options.headers : {}),
-          },
-        });
-        // 嘗試以 JSON 解析；若失敗以文字再 JSON.parse
-        try {
-          return await res.json();
-        } catch (_) {
-          const txt = await res.text();
-          return JSON.parse(txt);
-        }
-      } catch (err) {
-        // 將錯誤回拋給上層做 fallback
-        throw err;
-      }
-    }
-
     async function fetchRefDataFromN8n({ apiKey, customerId }) {
-      const params = new URLSearchParams(window.location.search);
-      const overrideEndpoint = params.get('refEndpoint'); // 允許用 ?refEndpoint= 覆寫
-      const primary = overrideEndpoint || 'https://n8n-cors-proxy.zeabur.app/n8n/get-ref-data';
-
-      // 1) 嘗試 PRIMARY：POST
+      const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/get-ref-data';
+      const headers = { 'X-API-Key': apiKey };
       try {
-        const data = await safeFetchJSON(`${primary}?key=${encodeURIComponent(apiKey)}`, {
+        const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
           method: 'POST',
-          headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
+          headers: { ...headers, 'Content-Type': 'application/json' },
           body: JSON.stringify({ customerId }),
         });
+        const data = await res.json().catch(()=>null);
         const normalized = normalizeRefData(data, customerId);
         if (normalized) return normalized;
-      } catch (e) {
-        console.warn('[ref-data] primary POST 失敗：', e);
-      }
-
-      // 2) 嘗試 PRIMARY：GET
+      } catch(e){}
       try {
-        const data = await safeFetchJSON(`${primary}?key=${encodeURIComponent(apiKey)}&customerId=${encodeURIComponent(customerId)}`, {
+        const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}&customerId=${encodeURIComponent(customerId)}`, {
           method: 'GET',
-          headers: { 'X-API-Key': apiKey },
+          headers,
         });
+        const data = await res.json().catch(()=>null);
         const normalized = normalizeRefData(data, customerId);
         if (normalized) return normalized;
-      } catch (e) {
-        console.warn('[ref-data] primary GET 失敗：', e);
-      }
-
-      // 3) Fallback：使用通用 CORS 代理（只支援 GET），避免 Content-Encoding 錯誤
-      // 注意：此路徑僅作為讀取參考資料的備援；會攜帶 query 參數
-      try {
-        const encoded = encodeURIComponent(`${primary}?key=${encodeURIComponent(apiKey)}&customerId=${encodeURIComponent(customerId)}`);
-        const proxyUrl = `https://cors.isomorphic-git.org/${decodeURIComponent(encoded)}`;
-        const data = await safeFetchJSON(proxyUrl, { method: 'GET' });
-        const normalized = normalizeRefData(data, customerId);
-        if (normalized) return normalized;
-      } catch (e) {
-        console.warn('[ref-data] proxy GET 失敗：', e);
-      }
-
+      } catch(e){}
       return null;
     }
 
     async function addRefRuleToN8n({ apiKey, customerId, rules }) {
-      const params = new URLSearchParams(window.location.search);
-      const overrideEndpoint = params.get('addRefEndpoint');
-      const primary = overrideEndpoint || 'https://n8n-cors-proxy.zeabur.app/n8n/add-ref-data';
-
-      // 主要以 POST 送出；若失敗就回傳錯誤（此功能通常不適合走公開 CORS 代理）
-      const res = await fetch(`${primary}?key=${encodeURIComponent(apiKey)}`, {
+      const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/add-ref-data';
+      const headers = { 'X-API-Key': apiKey, 'Content-Type': 'application/json' };
+      const payload = { customerId, rules };
+      const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
         method: 'POST',
-        headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json', 'Accept': 'application/json, text/plain, */*' },
-        body: JSON.stringify({ customerId, rules }),
-        cache: 'no-store',
-        credentials: 'omit',
-        redirect: 'follow',
+        headers,
+        body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(`n8n 回應非 2xx（HTTP ${res.status}）`);
-      try {
-        return await res.json();
-      } catch {
-        return {};
-      }
+      return await res.json().catch(() => ({}));
     }
 
     function InvoiceReviewApp() {
@@ -202,7 +144,7 @@
       const [originalDetailsData, setOriginalDetailsData] = useState([]);
 
       const [refData, setRefData] = useState([]);
-      const [fixedRefData, setFixedRefData] = useState([]); // 預設不帶內建參考資料
+      const [fixedRefData, setFixedRefData] = useState([]);
 
       const [pendingReviews, setPendingReviews] = useState([]);
       const [currentReviewIndex, setCurrentReviewIndex] = useState(0);
@@ -218,9 +160,24 @@
       const [editingInvoice, setEditingInvoice] = useState(null);
       const [newlyAddedRefData, setNewlyAddedRefData] = useState([]);
 
-      const [n8nGetStatus, setN8nGetStatus] = useState(null); // null | 'ok' | 'fail' | 'skip'
-      const [n8nAddStatus, setN8nAddStatus] = useState(null); // null | 'ok' | 'fail'
+      const [n8nGetStatus, setN8nGetStatus] = useState(null);
+      const [n8nAddStatus, setN8nAddStatus] = useState(null);
 
+      const calculateSimilarity = (a,b)=>{
+        a=(a||'').toString(); b=(b||'').toString();
+        const longer=a.length>b.length?a:b, shorter=a.length>b.length?b:a;
+        if (!longer.length) return 1.0;
+        const m = Array(shorter.length+1).fill().map(()=>Array(longer.length+1).fill(0));
+        for(let i=0;i<=shorter.length;i++) m[i][0]=i;
+        for(let j=0;j<=longer.length;j++) m[0][j]=j;
+        for(let i=1;i<=shorter.length;i++){
+          for(let j=1;j<=longer.length;j++){
+            m[i][j]=shorter[i-1]===longer[j-1]?m[i-1][j-1]:Math.min(m[i-1][j-1],m[i][j-1],m[i-1][j])+1;
+          }
+        }
+        const d=m[shorter.length][longer.length];
+        return (longer.length-d)/longer.length;
+      };
       const consolidateItems = (items)=>{
         if(!items||!items.length) return [];
         const res=[], used=new Set();
@@ -229,8 +186,7 @@
           const cur=items[i], similar=[cur]; used.add(i);
           for(let j=i+1;j<items.length;j++){
             if(used.has(j)) continue;
-            // 粗略的相似度比對（可依需求再微調）
-            if(cur && items[j] && (cur.includes(items[j]) || items[j].includes(cur))) { similar.push(items[j]); used.add(j); }
+            if(calculateSimilarity(cur,items[j])>=0.8){ similar.push(items[j]); used.add(j); }
           }
           if(similar.length>1){
             const shortest = similar.reduce((x,y)=>x.length<y.length?x:y);
@@ -269,7 +225,6 @@
           setOriginalDetailsData(detailsSheetData);
           setInvoiceData(invoiceSheetData);
           setInvoiceDetailsData(detailsSheetData);
-          // 2. Excel 上傳後直接載入參考資料
           await searchRefData(id);
         } catch (e) {
           setError('檔案讀取失敗：' + (e?.message || String(e)));
@@ -317,31 +272,25 @@
         reader.readAsArrayBuffer(file);
       });
 
-      // 3. 依條件顯示參考資料，或直接進入審核
       const searchRefData = async (customerIdParam) => {
         const cid = customerIdParam || companyId;
-        setStep(2); // 先進入參考資料階段
+        setStep(2);
         setInfo('正在載入參考資料...');
         let fetched = null;
         if (apiKey) {
           try {
             fetched = await fetchRefDataFromN8n({ apiKey, customerId: cid });
+            if (fetched) { setFixedRefData(fetched); setN8nGetStatus('ok'); }
+            else { setN8nGetStatus('fail'); setInfo(''); }
           } catch (e) {
-            // 即使錯誤也不中斷流程
-            console.warn('取得參考資料發生例外：', e);
+            setN8nGetStatus('fail'); setInfo('');
           }
-          if (fetched) { setFixedRefData(fetched); setN8nGetStatus('ok'); setInfo(''); }
-          else { setN8nGetStatus('fail'); setInfo('未能從遠端取得參考資料。'); }
         } else {
-          setN8nGetStatus('skip');
-          setInfo('');
+          setN8nGetStatus('skip'); setInfo('');
         }
         const useList = fetched || fixedRefData;
         const data = (useList || []).filter(r => r.customerId === cid);
-        setRefData(data);
-
         if (!data || data.length === 0) {
-          // 無參考資料：直接建立待審清單並進入逐筆審核畫面
           const cleaned = invoiceData.map(inv => {
             const invItems = invoiceDetailsData
               .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
@@ -353,13 +302,13 @@
           setPendingReviews(cleaned);
           setStep(4);
         } else {
-          // 有參考資料：顯示列表（排序：不可扣抵在前、可扣抵在後）
           const sorted = [...data].sort((a,b)=>{
             const av = a.deductable === 'No' ? 0 : 1;
             const bv = b.deductable === 'No' ? 0 : 1;
             return av - bv;
           });
           setRefData(sorted);
+          setInfo('');
         }
       };
 
@@ -553,7 +502,7 @@
             const updated = invoiceData.find(x => x.invoiceNumber === inv.invoiceNumber);
             if (updated) {
               const row = [...inv.originalRow];
-              row[1] = updated.buyerNote; // 買受人註記
+              row[1] = updated.buyerNote;
               return row;
             }
             return inv.originalRow;
@@ -581,8 +530,6 @@
             <div className="bg-blue-500 h-1 transition-all duration-300 rounded"
                  style={{ width: `${(step/6)*100}%` }} />
           </div>
-
-          {/* API 提示已移除 */}
 
           <div className={`bg-white rounded-xl shadow-md py-3 px-8 work-container ${step===4 ? 'h-[80vh] flex flex-col' : ''}`}>
             {step===1 && (
@@ -804,7 +751,7 @@
                     <div className="text-xs text-gray-700">共新增 {newlyAddedRefData.length} 筆，送出狀態：{
                       n8nAddStatus==='ok' ? '成功' : n8nAddStatus==='fail' ? '失敗' : '處理中'
                     }</div>
-                    {n8nAddStatus==='fail' && apiKey && (
+                    {n8nAddStatus==='fail' && (
                       <div className="mt-2">
                         <button onClick={retrySendToN8n}
                                 className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600">重新傳送</button>
