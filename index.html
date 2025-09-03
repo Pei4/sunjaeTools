@@ -25,6 +25,7 @@
       }
       add('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js', function(){
         if (!window.XLSX) {
+          // 若例外狀況：onload 仍沒有掛上 XLSX，再嘗試 unpkg
           add('https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js', function(){
             if (!window.XLSX) {
               console.error('無法載入 XLSX 函式庫。');
@@ -144,7 +145,16 @@
       const [originalDetailsData, setOriginalDetailsData] = useState([]);
 
       const [refData, setRefData] = useState([]);
-      const [fixedRefData, setFixedRefData] = useState([]);
+      const [fixedRefData, setFixedRefData] = useState([
+        { customerId: '87097348', deductable: 'Yes', sellerId: '27365925', keyword: '面膜' },
+        { customerId: '87097348', deductable: 'Yes', sellerId: '27365925', keyword: '防曬' },
+        { customerId: '28152246', deductable: 'No',  sellerId: '28152246', keyword: '' },
+        { customerId: '28152246', deductable: 'No',  sellerId: '',         keyword: '餐飲' },
+        { customerId: '28152246', deductable: 'No',  sellerId: '',         keyword: '料理' },
+        { customerId: '28152246', deductable: 'Yes', sellerId: '13750574', keyword: '運什費' },
+        { customerId: '28152246', deductable: 'Yes', sellerId: '52003801', keyword: '' },
+        { customerId: '28152246', deductable: 'Yes', sellerId: '05386910', keyword: '' },
+      ]);
 
       const [pendingReviews, setPendingReviews] = useState([]);
       const [currentReviewIndex, setCurrentReviewIndex] = useState(0);
@@ -160,8 +170,8 @@
       const [editingInvoice, setEditingInvoice] = useState(null);
       const [newlyAddedRefData, setNewlyAddedRefData] = useState([]);
 
-      const [n8nGetStatus, setN8nGetStatus] = useState(null);
-      const [n8nAddStatus, setN8nAddStatus] = useState(null);
+      const [n8nGetStatus, setN8nGetStatus] = useState(null); // null | 'ok' | 'fail' | 'skip'
+      const [n8nAddStatus, setN8nAddStatus] = useState(null); // null | 'ok' | 'fail'
 
       const calculateSimilarity = (a,b)=>{
         a=(a||'').toString(); b=(b||'').toString();
@@ -225,7 +235,7 @@
           setOriginalDetailsData(detailsSheetData);
           setInvoiceData(invoiceSheetData);
           setInvoiceDetailsData(detailsSheetData);
-          await searchRefData(id);
+          setStep(2);
         } catch (e) {
           setError('檔案讀取失敗：' + (e?.message || String(e)));
         }
@@ -272,52 +282,25 @@
         reader.readAsArrayBuffer(file);
       });
 
-      const searchRefData = async (customerIdParam) => {
-        const cid = customerIdParam || companyId;
-        setStep(2);
+      const searchRefData = async () => {
         setInfo('正在載入參考資料...');
         let fetched = null;
         if (apiKey) {
-          try {
-            fetched = await fetchRefDataFromN8n({ apiKey, customerId: cid });
-            if (fetched) { setFixedRefData(fetched); setN8nGetStatus('ok'); }
-            else { setN8nGetStatus('fail'); setInfo(''); }
-          } catch (e) {
-            setN8nGetStatus('fail'); setInfo('');
-          }
+          fetched = await fetchRefDataFromN8n({ apiKey, customerId: companyId });
+          if (fetched) { setFixedRefData(fetched); setN8nGetStatus('ok'); }
+          else { setN8nGetStatus('fail'); setInfo('未能自 n8n 取得參考資料，改用本地預設。'); }
         } else {
-          setN8nGetStatus('skip'); setInfo('');
+          setN8nGetStatus('skip');
+          setInfo('未偵測到 ?key=API金鑰，將使用本地預設參考資料。');
         }
         const useList = fetched || fixedRefData;
-        const data = (useList || []).filter(r => r.customerId === cid);
-        if (!data || data.length === 0) {
-          const cleaned = invoiceData.map(inv => {
-            const invItems = invoiceDetailsData
-              .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
-              .map(d => d.itemName)
-              .filter(Boolean);
-            return { ...inv, buyerNote:'待查', items:invItems, consolidatedItems:consolidateItems(invItems) };
-          });
-          setInvoiceData(cleaned);
-          setPendingReviews(cleaned);
-          setStep(4);
-        } else {
-          const sorted = [...data].sort((a,b)=>{
-            const av = a.deductable === 'No' ? 0 : 1;
-            const bv = b.deductable === 'No' ? 0 : 1;
-            return av - bv;
-          });
-          setRefData(sorted);
-          setInfo('');
-        }
-      };
-
-      const startCleaningWithRef = () => {
-        initialDataCleaning(refData);
+        const data = (useList || []).filter(r => r.customerId === companyId);
+        setRefData(data);
+        setStep(3);
+        setTimeout(()=>initialDataCleaning(data),100);
       };
 
       const initialDataCleaning = (useRef) => {
-        setStep(3);
         setProgress(0);
         const interval = setInterval(() => {
           setProgress(prev => {
@@ -473,13 +456,13 @@
       const handleConfirmCompletion = async () => {
         setStep(6);
         if (!newlyAddedRefData.length) { setN8nAddStatus('ok'); return; }
-        if (!apiKey) { setN8nAddStatus('fail'); setInfo(''); return; }
+        if (!apiKey) { setN8nAddStatus('fail'); setInfo('未偵測到 API 金鑰，無法將新增參考資料傳至 n8n。'); return; }
         try {
           await addRefRuleToN8n({ apiKey, customerId: companyId, rules: newlyAddedRefData });
           setN8nAddStatus('ok');
         } catch (e) {
           setN8nAddStatus('fail');
-          setInfo('新增參考資料傳送失敗。');
+          setInfo('新增參考資料傳送至 n8n 失敗：' + (e?.message || String(e)));
         }
       };
 
@@ -487,10 +470,10 @@
         try {
           await addRefRuleToN8n({ apiKey, customerId: companyId, rules: newlyAddedRefData });
           setN8nAddStatus('ok');
-          setInfo('已成功重新傳送。');
+          setInfo('已成功重新傳送至 n8n。');
         } catch (e) {
           setN8nAddStatus('fail');
-          setInfo('重送失敗。');
+          setInfo('重送失敗：' + (e?.message || String(e)));
         }
       };
 
@@ -502,7 +485,7 @@
             const updated = invoiceData.find(x => x.invoiceNumber === inv.invoiceNumber);
             if (updated) {
               const row = [...inv.originalRow];
-              row[1] = updated.buyerNote;
+              row[1] = updated.buyerNote; // 買受人註記
               return row;
             }
             return inv.originalRow;
@@ -531,7 +514,20 @@
                  style={{ width: `${(step/6)*100}%` }} />
           </div>
 
-          <div className={`bg-white rounded-xl shadow-md py-3 px-8 work-container ${step===4 ? 'h-[80vh] flex flex-col' : ''}`}>
+          <div className="mb-3">
+            {!apiKey ? (
+              <div className="bg-yellow-50 border border-yellow-200 text-yellow-900 text-sm rounded px-3 py-2 flex items-center gap-2">
+                <Icon name="warn" className="w-4 h-4" />
+                未偵測到 API 金鑰。若要串接 n8n，請在網址後加上 ?key=你的金鑰
+              </div>
+            ) : (
+              <div className="bg-green-50 border border-green-200 text-green-900 text-sm rounded px-3 py-2">
+                已偵測到 API 金鑰，將透過 Header <code className="px-1 bg-white rounded border">X-API-Key</code> 呼叫 n8n。
+              </div>
+            )}
+          </div>
+
+          <div className={`bg-white rounded-xl shadow-md py-3 px-8 work-container ${step===4 ? 'h-[60vh] flex flex-col' : ''}`}>
             {step===1 && (
               <div className="text-center min-h-96">
                 <Icon name="upload" className="w-12 h-12 mx-auto mb-3 text-blue-500" />
@@ -569,11 +565,11 @@
             {step===2 && (
               <div className="text-center min-h-96">
                 <Icon name="db" className="w-12 h-12 mx-auto mb-3 text-blue-500" />
-                <h2 className="text-lg font-bold mb-3">參考資料</h2>
-                {info && <p className="text-sm text-gray-600 mb-4">{info}</p>}
-                {(refData && refData.length>0) ? (
-                  <div className="bg-gray-50 rounded-lg p-3 mb-4">
-                    <h3 className="text-sm font-semibold mb-3 text-center">已取得的參考資料（不可扣抵優先顯示）</h3>
+                <h2 className="text-lg font-bold mb-3">載入參考資料</h2>
+                <p className="text-sm text-gray-600 mb-4">系統將載入供應商參考資料進行比對</p>
+                <div className="bg-gray-50 rounded-lg p-3 mb-4">
+                  <h3 className="text-sm font-semibold mb-3 text-center">將使用的參考資料（目前顯示預設，點擊下方按鈕後會嘗試由 n8n 覆寫）：</h3>
+                  {(fixedRefData.filter(r => r.customerId === companyId).length>0) ? (
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs mx-auto">
                         <thead>
@@ -584,7 +580,7 @@
                           </tr>
                         </thead>
                         <tbody>
-                          {refData.map((ref, idx) => (
+                          {fixedRefData.filter(r => r.customerId === companyId).map((ref, idx) => (
                             <tr key={idx} className="border-b border-gray-200">
                               <td className="py-2 px-2 text-center">
                                 <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${ref.deductable==='Yes'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>
@@ -598,16 +594,15 @@
                         </tbody>
                       </table>
                     </div>
-                    <div className="mt-4">
-                      <button onClick={startCleaningWithRef}
-                              className="bg-blue-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-600 transition-colors">
-                        開始清理
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-sm text-gray-500">未取得參考資料，已自動進入逐筆審核。</div>
-                )}
+                  ) : (
+                    <div className="text-xs text-gray-500 text-center">沒有找到符合客戶統編的參考資料</div>
+                  )}
+                </div>
+                {info && <p className="text-xs text-gray-500 mb-2">{info}</p>}
+                <button onClick={searchRefData}
+                        className="bg-blue-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-600 transition-colors">
+                  載入參考資料
+                </button>
               </div>
             )}
 
@@ -639,7 +634,7 @@
                       <p className="text-sm text-gray-600">進度：{currentReviewIndex+1} / {pendingReviews.length}</p>
                     </div>
 
-                    <div className="bg-white border rounded-lg p-4 flex-shrink-0" style={{height:'420px'}}>
+                    <div className="bg-white border rounded-lg p-4 flex-shrink-0" style={{height:'380px'}}>
                       <div className="grid grid-cols-2 gap-4 mb-3 h-12">
                         <div>
                           <label className="block text-xs font-medium text-gray-700 mb-1">發票號碼</label>
@@ -655,7 +650,7 @@
 
                       <div className="mb-3">
                         <label className="block text-xs font-medium text-gray-700 mb-2">發票商品明細</label>
-                        <div className="space-y-2 overflow-y-auto bg-gray-50 rounded p-2" style={{height:'240px'}}>
+                        <div className="space-y-2 overflow-y-auto bg-gray-50 rounded p-2" style={{height:'120px'}}>
                           {pendingReviews[currentReviewIndex].consolidatedItems?.map((item, idx) => (
                             <div key={idx} className="bg-white p-2 rounded shadow-sm">
                               <span className="text-xs text-gray-800">{item}</span>
@@ -748,27 +743,28 @@
                 {newlyAddedRefData.length>0 && (
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-left">
                     <h3 className="text-sm font-semibold mb-2">本次新增的參考資料：</h3>
-                    <div className="text-xs text-gray-700">共新增 {newlyAddedRefData.length} 筆，送出狀態：{
+                    <div className="text-xs text-gray-700">共新增 {newlyAddedRefData.length} 筆，已嘗試傳送至 n8n：{
                       n8nAddStatus==='ok' ? '成功' : n8nAddStatus==='fail' ? '失敗' : '處理中'
                     }</div>
-                    {n8nAddStatus==='fail' && (
+                    {n8nAddStatus==='fail' && apiKey && (
                       <div className="mt-2">
                         <button onClick={retrySendToN8n}
-                                className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600">重新傳送</button>
+                                className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600">重新傳送到 n8n</button>
                       </div>
                     )}
+                    {!apiKey && <div className="text-xs text-yellow-700 mt-1">未帶 API 金鑰，無法自動傳送至 n8n。</div>}
                   </div>
                 )}
 
                 {info && <p className="text-xs text-gray-500 mb-3">{info}</p>}
 
-                <div className="flex flex-col items-center gap-3">
+                <div className="space-y-3">
                   <button onClick={downloadResults}
-                          className="w-full md:w-64 bg-green-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-green-600 transition-colors inline-flex items-center justify-center gap-2">
+                          className="bg-green-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-green-600 transition-colors inline-flex items-center gap-2">
                     <Icon name="save" className="w-4 h-4" /> 下載處理結果
                   </button>
                   <button onClick={()=>setStep(5)}
-                          className="w-full md:w-64 bg-gray-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-gray-600 transition-colors inline-flex items-center justify-center gap-2">
+                          className="bg-gray-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-gray-600 transition-colors inline-flex items-center gap-2">
                     返回結果列表
                   </button>
                   <button onClick={()=>{
@@ -777,9 +773,9 @@
                             setOriginalInvoiceData([]); setOriginalDetailsData([]);
                             setPendingReviews([]); setCurrentReviewIndex(0);
                             setError(''); setNewlyAddedRefData([]);
-                            setInfo(''); setN8nAddStatus(null); setN8nGetStatus(null); setRefData([]); setFixedRefData([]);
+                            setInfo(''); setN8nAddStatus(null); setN8nGetStatus(null);
                           }}
-                          className="w-full md:w-64 bg-blue-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-600 transition-colors inline-flex items-center justify-center gap-2">
+                          className="bg-blue-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-600 transition-colors inline-flex items-center gap-2">
                     處理新檔案
                   </button>
                 </div>
