@@ -11,16 +11,14 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <!-- SheetJS: 讀寫 Excel（先用 jsDelivr，失敗就 fallback 到 unpkg） -->
+  <!-- SheetJS: 讀寫 Excel -->
   <script>
     (function loadXLSX() {
       function add(src, onload) {
         var s = document.createElement('script');
         s.src = src;
         s.onload = onload;
-        s.onerror = function(){
-          console.warn('載入失敗：', src);
-        };
+        s.onerror = function(){ console.warn('載入失敗：', src); };
         document.head.appendChild(s);
       }
       add('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js', function(){
@@ -225,7 +223,9 @@
           setOriginalDetailsData(detailsSheetData);
           setInvoiceData(invoiceSheetData);
           setInvoiceDetailsData(detailsSheetData);
-          await searchRefData(id);
+
+          // 關鍵：將剛解析的兩個陣列直接傳進 searchRefData，避免讀到尚未完成更新的狀態
+          await searchRefData(id, invoiceSheetData, detailsSheetData);
         } catch (e) {
           setError('檔案讀取失敗：' + (e?.message || String(e)));
         }
@@ -272,10 +272,16 @@
         reader.readAsArrayBuffer(file);
       });
 
-      const searchRefData = async (customerIdParam) => {
+      // 支援帶入最新的發票與明細資料，避免狀態尚未完成更新造成空資料
+      const searchRefData = async (customerIdParam, invoicesArg, detailsArg) => {
         const cid = customerIdParam || companyId;
         setStep(2);
         setInfo('正在載入參考資料...');
+
+        // 以參數為主，狀態為輔
+        const invoices = Array.isArray(invoicesArg) ? invoicesArg : invoiceData;
+        const details  = Array.isArray(detailsArg)  ? detailsArg  : invoiceDetailsData;
+
         let fetched = null;
         if (apiKey) {
           try {
@@ -290,17 +296,16 @@
         }
         const useList = fetched || fixedRefData;
 
-        // 變更點①：若取得的參考資料其 customerId 皆為空（代表來源沒有帶 customerId），
-        // 直接讓所有發票進入逐筆審核。
+        // 任一筆 customerId 為空 → 視為無效，直接全部進人工逐筆審核
         const anyCidEmpty = (useList && useList.length > 0) &&
-                    useList.some(r => !String(r.customerId || '').trim());
+                            useList.some(r => !String(r.customerId || '').trim());
         if (anyCidEmpty) {
-          const cleaned = invoiceData.map(inv => {
-            const invItems = invoiceDetailsData
+          const cleaned = invoices.map(inv => {
+            const invItems = details
               .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
               .map(d => d.itemName)
               .filter(Boolean);
-            return { ...inv, buyerNote: '待查', items: invItems, consolidatedItems: consolidateItems(invItems) };
+            return { ...inv, buyerNote:'待查', items:invItems, consolidatedItems:consolidateItems(invItems) };
           });
           setInvoiceData(cleaned);
           setPendingReviews(cleaned);
@@ -308,10 +313,11 @@
           return;
         }
 
+        // 有 ref 但沒有符合當前 customerId → 也進人工逐筆審核
         const data = (useList || []).filter(r => r.customerId === cid);
         if (!data || data.length === 0) {
-          const cleaned = invoiceData.map(inv => {
-            const invItems = invoiceDetailsData
+          const cleaned = invoices.map(inv => {
+            const invItems = details
               .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
               .map(d => d.itemName)
               .filter(Boolean);
@@ -550,7 +556,7 @@
                  style={{ width: `${(step/6)*100}%` }} />
           </div>
 
-          {/* 變更點②：主工作區塊改為固定 h-[95vh] 並保持 flex 直向布局 */}
+          {/* 主工作區塊固定 h-[95vh] */}
           <div className={`bg-white rounded-xl shadow-md py-3 px-8 work-container h-[95vh] flex flex-col`}>
             {step===1 && (
               <div className="text-center min-h-96">
