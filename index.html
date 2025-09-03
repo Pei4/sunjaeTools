@@ -292,15 +292,15 @@
 
         // 變更點①：若取得的參考資料其 customerId 皆為空（代表來源沒有帶 customerId），
         // 直接讓所有發票進入逐筆審核。
-        const allCidEmpty = (useList && useList.length > 0) &&
-                            useList.every(r => !String(r.customerId || '').trim());
-        if (allCidEmpty) {
+        const anyCidEmpty = (useList && useList.length > 0) &&
+                    useList.some(r => !String(r.customerId || '').trim());
+        if (anyCidEmpty) {
           const cleaned = invoiceData.map(inv => {
             const invItems = invoiceDetailsData
               .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
               .map(d => d.itemName)
               .filter(Boolean);
-            return { ...inv, buyerNote:'待查', items:invItems, consolidatedItems:consolidateItems(invItems) };
+            return { ...inv, buyerNote: '待查', items: invItems, consolidatedItems: consolidateItems(invItems) };
           });
           setInvoiceData(cleaned);
           setPendingReviews(cleaned);
