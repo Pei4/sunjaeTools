@@ -4,14 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>發票審核系統 (GitHub Pages 版)</title>
-  <!-- Tailwind (CDN) -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- React 18 UMD + Babel Standalone -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-  <!-- SheetJS: 讀寫 Excel -->
   <script>
     (function loadXLSX() {
       function add(src, onload) {
@@ -33,7 +29,6 @@
       });
     })();
   </script>
-
   <style>
     .work-container{width:100%}
     @media (min-width: 800px){.work-container{width:70%;margin:0 auto}}
@@ -116,6 +111,7 @@
       return null;
     }
 
+    // 這裡改成 keepalive: true（重點）
     async function addRefRuleToN8n({ apiKey, customerId, rules }) {
       const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/add-ref-data';
       const headers = { 'X-API-Key': apiKey, 'Content-Type': 'application/json' };
@@ -124,6 +120,7 @@
         method: 'POST',
         headers,
         body: JSON.stringify(payload),
+        keepalive: true
       });
       if (!res.ok) throw new Error(`n8n 回應非 2xx（HTTP ${res.status}）`);
       return await res.json().catch(() => ({}));
@@ -131,7 +128,6 @@
 
     function InvoiceReviewApp() {
       const apiKey = useApiKey();
-
       const [step, setStep] = useState(1);
       const [companyId, setCompanyId] = useState('');
       const [uploadedFile, setUploadedFile] = useState(null);
@@ -223,8 +219,6 @@
           setOriginalDetailsData(detailsSheetData);
           setInvoiceData(invoiceSheetData);
           setInvoiceDetailsData(detailsSheetData);
-
-          // 關鍵：將剛解析的兩個陣列直接傳進 searchRefData，避免讀到尚未完成更新的狀態
           await searchRefData(id, invoiceSheetData, detailsSheetData);
         } catch (e) {
           setError('檔案讀取失敗：' + (e?.message || String(e)));
@@ -272,13 +266,11 @@
         reader.readAsArrayBuffer(file);
       });
 
-      // 支援帶入最新的發票與明細資料，避免狀態尚未完成更新造成空資料
       const searchRefData = async (customerIdParam, invoicesArg, detailsArg) => {
         const cid = customerIdParam || companyId;
         setStep(2);
         setInfo('正在載入參考資料...');
 
-        // 以參數為主，狀態為輔
         const invoices = Array.isArray(invoicesArg) ? invoicesArg : invoiceData;
         const details  = Array.isArray(detailsArg)  ? detailsArg  : invoiceDetailsData;
 
@@ -296,7 +288,6 @@
         }
         const useList = fetched || fixedRefData;
 
-        // 任一筆 customerId 為空 → 視為無效，直接全部進人工逐筆審核
         const anyCidEmpty = (useList && useList.length > 0) &&
                             useList.some(r => !String(r.customerId || '').trim());
         if (anyCidEmpty) {
@@ -313,7 +304,6 @@
           return;
         }
 
-        // 有 ref 但沒有符合當前 customerId → 也進人工逐筆審核
         const data = (useList || []).filter(r => r.customerId === cid);
         if (!data || data.length === 0) {
           const cleaned = invoices.map(inv => {
@@ -337,9 +327,7 @@
         }
       };
 
-      const startCleaningWithRef = () => {
-        initialDataCleaning(refData);
-      };
+      const startCleaningWithRef = () => { initialDataCleaning(refData); };
 
       const initialDataCleaning = (useRef) => {
         setStep(3);
@@ -460,11 +448,8 @@
           setNewKeyword(''); setIncludeSellerID(false);
           return;
         }
-        if (currentReviewIndex < pendingReviews.length - 1) {
-          setCurrentReviewIndex(i => i + 1);
-        } else {
-          setStep(5);
-        }
+        if (currentReviewIndex < pendingReviews.length - 1) setCurrentReviewIndex(i => i + 1);
+        else setStep(5);
       };
 
       const openEditModal = (invoice) => {
@@ -473,12 +458,7 @@
         setEditIncludeSellerID(false);
         setShowEditModal(true);
       };
-      const closeEditModal = () => {
-        setShowEditModal(false);
-        setEditingInvoice(null);
-        setNewKeyword('');
-        setEditIncludeSellerID(false);
-      };
+      const closeEditModal = () => { setShowEditModal(false); setEditingInvoice(null); setNewKeyword(''); setEditIncludeSellerID(false); };
       const handleEditDecision = (decision) => {
         if (!editingInvoice) return;
         const updated = invoiceData.map(inv =>
@@ -552,12 +532,10 @@
       return (
         <div className="max-w-6xl mx-auto px-2 py-4">
           <div className="w-full bg-gray-200 h-1 mb-3 rounded">
-            <div className="bg-blue-500 h-1 transition-all duration-300 rounded"
-                 style={{ width: `${(step/6)*100}%` }} />
+            <div className="bg-blue-500 h-1 transition-all duration-300 rounded" style={{ width: `${(step/6)*100}%` }} />
           </div>
 
-          {/* 主工作區塊固定 h-[95vh] */}
-          <div className={`bg-white rounded-xl shadow-md py-3 px-8 work-container h-[95vh] flex flex-col`}>
+          <div className="bg-white rounded-xl shadow-md py-3 px-8 work-container h-[95vh] flex flex-col">
             {step===1 && (
               <div className="text-center min-h-96">
                 <Icon name="upload" className="w-12 h-12 mx-auto mb-3 text-blue-500" />
@@ -710,7 +688,7 @@
                         <Icon name="check" className="w-3 h-3" />可扣抵
                       </button>
                       <button onClick={()=>handleReviewDecision('non-deductible')}
-                              className="flex-1 bg-red-500 text-white px-4 py-2 text-xs rounded-lg hover:bg-red-600 transition-colors flex items-center justify-center gap-2">
+                              className="flex-1 bg-red-500 text-white px-4 py-2 text-xs rounded-lg hover:bg-red-600 transition-colors flex items-center justify中心 gap-2">
                         <Icon name="x" className="w-3 h-3" />不可扣抵
                       </button>
                     </div>
@@ -790,11 +768,11 @@
 
                 <div className="flex flex-col items-center gap-3">
                   <button onClick={downloadResults}
-                          className="w-full md:w-64 bg-green-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-green-600 transition-colors inline-flex items-center justify-center gap-2">
+                          className="w-full md:w-64 bg-green-500 text白 px-4 py-2 text-sm rounded-lg hover:bg-green-600 transition-colors inline-flex items-center justify-center gap-2">
                     <Icon name="save" className="w-4 h-4" /> 下載處理結果
                   </button>
                   <button onClick={()=>setStep(5)}
-                          className="w-full md:w-64 bg-gray-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-gray-600 transition-colors inline-flex items-center justify-center gap-2">
+                          className="w-full md:w-64 bg-gray-500 text白 px-4 py-2 text-sm rounded-lg hover:bg-gray-600 transition-colors inline-flex items-center justify-center gap-2">
                     返回結果列表
                   </button>
                   <button onClick={()=>{
@@ -805,7 +783,7 @@
                             setError(''); setNewlyAddedRefData([]);
                             setInfo(''); setN8nAddStatus(null); setN8nGetStatus(null); setRefData([]); setFixedRefData([]);
                           }}
-                          className="w-full md:w-64 bg-blue-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-600 transition-colors inline-flex items-center justify-center gap-2">
+                          className="w-full md:w-64 bg-blue-500 text白 px-4 py-2 text-sm rounded-lg hover:bg-blue-600 transition-colors inline-flex items-center justify-center gap-2">
                     處理新檔案
                   </button>
                 </div>
@@ -814,7 +792,7 @@
 
             {showEditModal && editingInvoice && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                <div className="bg-white rounded-lg p-4 max-w-2xl w-full mx-4 max-h-96 overflow-y-auto">
+                <div className="bg白 rounded-lg p-4 max-w-2xl w-full mx-4 max-h-96 overflow-y-auto">
                   <h3 className="text-sm font-bold mb-3">編輯發票審核結果</h3>
 
                   <div className="grid grid-cols-2 gap-3 mb-3">
@@ -861,15 +839,15 @@
 
                   <div className="flex gap-3">
                     <button onClick={()=>handleEditDecision('deductible')}
-                            className="flex-1 bg-green-500 text-white px-3 py-2 text-xs rounded-lg hover:bg-green-600 transition-colors inline-flex items-center justify-center gap-1">
+                            className="flex-1 bg-green-500 text白 px-3 py-2 text-xs rounded-lg hover:bg-green-600 transition-colors inline-flex items-center justify-center gap-1">
                       <Icon name="check" className="w-3 h-3" />可扣抵
                     </button>
                     <button onClick={()=>handleEditDecision('non-deductible')}
-                            className="flex-1 bg-red-500 text-white px-3 py-2 text-xs rounded-lg hover:bg-red-600 transition-colors inline-flex items-center justify-center gap-1">
+                            className="flex-1 bg-red-500 text白 px-3 py-2 text-xs rounded-lg hover:bg-red-600 transition-colors inline-flex items-center justify-center gap-1">
                       <Icon name="x" className="w-3 h-3" />不可扣抵
                     </button>
                     <button onClick={closeEditModal}
-                            className="flex-1 bg-gray-500 text-white px-3 py-2 text-xs rounded-lg hover:bg-gray-600 transition-colors">
+                            className="flex-1 bg-gray-500 text白 px-3 py-2 text-xs rounded-lg hover:bg-gray-600 transition-colors">
                       取消
                     </button>
                   </div>
