@@ -49,7 +49,6 @@
         x:      <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="m19 6.41-1.41-1.41L12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>,
         save:   <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="M17 3H5a2 2 0 0 0-2 2v14l4-4h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z"/></svg>,
         warn:   <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="M1 21h22L12 2 1 21Zm12-3h-2v-2h2v2Zm0-4h-2v-4h2v4Z"/></svg>,
-        download: <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="M5 20h14v-2H5v2Zm7-16v8.17l2.59-2.58 1.41 1.41L12 15.59l-4.99-4.99 1.41-1.41L11 12.17V4h1Z"/></svg>,
       };
       return icons[name] ?? null;
     }
@@ -62,13 +61,6 @@
       }, []);
       return apiKey;
     }
-
-    // 千分位整數格式化
-    const formatTWD = (n) => {
-      const num = Number(n || 0);
-      const int = Math.round(num);
-      return int.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-    };
 
     function normalizeRefData(raw, fallbackCustomerId) {
       if (!raw) return null;
@@ -98,7 +90,7 @@
       const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/get-ref-data';
       const headers = { 'X-API-Key': apiKey };
       try {
-        const res = await fetch(\`\${endpoint}?key=\${encodeURIComponent(apiKey)}\`, {
+        const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
           method: 'POST',
           headers: { ...headers, 'Content-Type': 'application/json' },
           body: JSON.stringify({ customerId }),
@@ -108,7 +100,7 @@
         if (normalized) return normalized;
       } catch(e){}
       try {
-        const res = await fetch(\`\${endpoint}?key=\${encodeURIComponent(apiKey)}&customerId=\${encodeURIComponent(customerId)}\`, {
+        const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}&customerId=${encodeURIComponent(customerId)}`, {
           method: 'GET',
           headers,
         });
@@ -119,17 +111,18 @@
       return null;
     }
 
+    // 這裡改成 keepalive: true（重點）
     async function addRefRuleToN8n({ apiKey, customerId, rules }) {
       const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/add-ref-data';
       const headers = { 'X-API-Key': apiKey, 'Content-Type': 'application/json' };
       const payload = { customerId, rules };
-      const res = await fetch(\`\${endpoint}?key=\${encodeURIComponent(apiKey)}\`, {
+      const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),
         keepalive: true
       });
-      if (!res.ok) throw new Error(\`n8n 回應非 2xx（HTTP \${res.status}）\`);
+      if (!res.ok) throw new Error(`n8n 回應非 2xx（HTTP ${res.status}）`);
       return await res.json().catch(() => ({}));
     }
 
@@ -179,30 +172,22 @@
         const d=m[shorter.length][longer.length];
         return (longer.length-d)/longer.length;
       };
-
       const consolidateItems = (items)=>{
         if(!items||!items.length) return [];
-        const used = new Set();
-        const out = [];
+        const res=[], used=new Set();
         for(let i=0;i<items.length;i++){
           if(used.has(i)) continue;
-          const cur = items[i];
-          let group = [i];
-          used.add(i);
+          const cur=items[i], similar=[cur]; used.add(i);
           for(let j=i+1;j<items.length;j++){
             if(used.has(j)) continue;
-            if(calculateSimilarity(cur.name, items[j].name) >= 0.8){
-              group.push(j);
-              used.add(j);
-            }
+            if(calculateSimilarity(cur,items[j])>=0.8){ similar.push(items[j]); used.add(j); }
           }
-          const names = group.map(idx => items[idx].name);
-          const shortest = names.reduce((x,y)=>x.length<y.length?x:y);
-          const count = group.length;
-          const totalAmount = group.reduce((sum, idx) => sum + Number(items[idx].amount || 0), 0);
-          out.push({ name: shortest, count, totalAmount });
+          if(similar.length>1){
+            const shortest = similar.reduce((x,y)=>x.length<y.length?x:y);
+            res.push(`${shortest} (${similar.length}項)`);
+          } else res.push(cur);
         }
-        return out;
+        return res;
       };
 
       const ensureXLSXReady = ()=>{
@@ -270,7 +255,6 @@
               const processed = rows.map((row, idx) => ({
                 invoiceNumber: row[0] || '',
                 itemName:      row[3] || '',
-                amount:        Number(row[7] || 0),
                 originalRow:   row,
                 rowIndex:      idx + 2,
               })).filter(it => String(it.invoiceNumber||'').trim() && String(it.itemName||'').trim());
@@ -306,18 +290,13 @@
 
         const anyCidEmpty = (useList && useList.length > 0) &&
                             useList.some(r => !String(r.customerId || '').trim());
-        const buildItems = (inv) => {
-          const invItems = details
-            .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
-            .map(d => ({ name: d.itemName, amount: Number(d.amount || 0) }))
-            .filter(x => x.name);
-          return { items: invItems, consolidatedItems: consolidateItems(invItems) };
-        };
-
         if (anyCidEmpty) {
           const cleaned = invoices.map(inv => {
-            const { items, consolidatedItems } = buildItems(inv);
-            return { ...inv, buyerNote:'待查', items, consolidatedItems };
+            const invItems = details
+              .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
+              .map(d => d.itemName)
+              .filter(Boolean);
+            return { ...inv, buyerNote:'待查', items:invItems, consolidatedItems:consolidateItems(invItems) };
           });
           setInvoiceData(cleaned);
           setPendingReviews(cleaned);
@@ -328,8 +307,11 @@
         const data = (useList || []).filter(r => r.customerId === cid);
         if (!data || data.length === 0) {
           const cleaned = invoices.map(inv => {
-            const { items, consolidatedItems } = buildItems(inv);
-            return { ...inv, buyerNote:'待查', items, consolidatedItems };
+            const invItems = details
+              .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
+              .map(d => d.itemName)
+              .filter(Boolean);
+            return { ...inv, buyerNote:'待查', items:invItems, consolidatedItems:consolidateItems(invItems) };
           });
           setInvoiceData(cleaned);
           setPendingReviews(cleaned);
@@ -356,9 +338,12 @@
               clearInterval(interval);
               const cleaned = invoiceData.map(inv => {
                 const invSellerId = String(inv.sellerId).trim();
-                const invItems = inv.items && inv.items.length ? inv.items : [];
+                const invItems = invoiceDetailsData
+                  .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
+                  .map(d => d.itemName)
+                  .filter(Boolean);
                 if (!useRef || !useRef.length) {
-                  return { ...inv, buyerNote:'待查', consolidatedItems: consolidateItems(invItems) };
+                  return { ...inv, buyerNote:'待查', items:invItems, consolidatedItems:consolidateItems(invItems) };
                 }
                 const yesRefs = useRef.filter(r => r.deductable === 'Yes');
                 const noRefs  = useRef.filter(r => r.deductable === 'No');
@@ -366,7 +351,7 @@
                   const rs = String(r.sellerId||'').trim();
                   const rk = (r.keyword||'').toString();
                   const sellerMatch = rs && rs === invSellerId;
-                  const keywordMatch = rk && invItems.some(it => it.name.includes(rk));
+                  const keywordMatch = rk && invItems.some(it => it.includes(rk));
                   if (rs && rk) return sellerMatch && keywordMatch;
                   if (rs && !rk) return sellerMatch;
                   if (!rs && rk) return keywordMatch;
@@ -376,13 +361,13 @@
                   const rs = String(r.sellerId||'').trim();
                   const rk = (r.keyword||'').toString();
                   if (rs && rs === invSellerId) return true;
-                  if (rk && invItems.some(it => it.name.includes(rk))) return true;
+                  if (rk && invItems.some(it => it.includes(rk))) return true;
                   return false;
                 });
                 let buyerNote = '待查';
                 if (hasYes) buyerNote = '';
                 else if (hasNo) buyerNote = '不得抵扣之進貨及費用';
-                return { ...inv, buyerNote, consolidatedItems: consolidateItems(invItems) };
+                return { ...inv, buyerNote, items:invItems, consolidatedItems:consolidateItems(invItems) };
               });
               setInvoiceData(cleaned);
               const pending = cleaned.filter(i => i.buyerNote === '待查');
@@ -418,7 +403,7 @@
             const rs = String(r.sellerId||'').trim();
             const rk = (r.keyword||'').toString();
             const sellerMatch = rs && rs === invSellerId;
-            const keywordMatch = rk && invItems.some(it => it.name.includes(rk));
+            const keywordMatch = rk && invItems.some(it => it.includes(rk));
             if (rs && rk) return sellerMatch && keywordMatch;
             if (rs && !rk) return sellerMatch;
             if (!rs && rk) return keywordMatch;
@@ -428,7 +413,7 @@
             const rs = String(r.sellerId||'').trim();
             const rk = (r.keyword||'').toString();
             if (rs && rs === invSellerId) return true;
-            if (rk && invItems.some(it => it.name.includes(rk))) return true;
+            if (rk && invItems.some(it => it.includes(rk))) return true;
             return false;
           });
           let buyerNote = '待查';
@@ -538,16 +523,16 @@
           window.XLSX.utils.book_append_sheet(wb, ws2, "Invoice_details");
 
           const dateStr = new Date().toISOString().slice(0,10);
-          window.XLSX.writeFile(wb, \`\${companyId}_處理結果_\${dateStr}.xlsx\`);
+          window.XLSX.writeFile(wb, `${companyId}_處理結果_${dateStr}.xlsx`);
         } catch (e) {
           alert('下載失敗：' + (e?.message || String(e)));
         }
       };
 
       return (
-        <div className="max-w-6xl mx-auto px-2 pt-0 pb-4">
+        <div className="max-w-6xl mx-auto px-2 py-4">
           <div className="w-full bg-gray-200 h-1 mb-3 rounded">
-            <div className="bg-blue-500 h-1 transition-all duration-300 rounded" style={{ width: \`\${(step/6)*100}%\` }} />
+            <div className="bg-blue-500 h-1 transition-all duration-300 rounded" style={{ width: `${(step/6)*100}%` }} />
           </div>
 
           <div className="bg-white rounded-xl shadow-md py-3 px-8 work-container h-[95vh] flex flex-col">
@@ -606,7 +591,7 @@
                           {refData.map((ref, idx) => (
                             <tr key={idx} className="border-b border-gray-200">
                               <td className="py-2 px-2 text-center">
-                                <span className={\`inline-flex px-2 py-1 text-xs font-medium rounded-full \${ref.deductable==='Yes'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}\`}>
+                                <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${ref.deductable==='Yes'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>
                                   {ref.deductable==='Yes'?'可扣抵':'不可扣抵'}
                                 </span>
                               </td>
@@ -636,7 +621,7 @@
                 <p className="text-sm text-gray-600 mb-4">正在根據參考資料進行自動判斷...</p>
                 <div className="mb-4">
                   <div className="w-full bg-gray-200 rounded-full h-2 mb-3">
-                    <div className="bg-blue-500 h-2 rounded-full transition-all duration-300" style={{ width: \`\${progress}%\` }} />
+                    <div className="bg-blue-500 h-2 rounded-full transition-all duration-300" style={{ width: `${progress}%` }} />
                   </div>
                   <p className="text-sm text-gray-600">處理中... {progress}%</p>
                 </div>
@@ -666,7 +651,7 @@
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-700 mb-1">賣方資訊</label>
-                          <p className="text-sm font-semibold truncate" title={\`\${pendingReviews[currentReviewIndex].sellerId} \${pendingReviews[currentReviewIndex].sellerName}\`}>
+                          <p className="text-sm font-semibold truncate" title={`${pendingReviews[currentReviewIndex].sellerId} ${pendingReviews[currentReviewIndex].sellerName}`}>
                             {pendingReviews[currentReviewIndex].sellerId} {pendingReviews[currentReviewIndex].sellerName}
                           </p>
                         </div>
@@ -675,11 +660,9 @@
                       <div className="mb-3">
                         <label className="block text-xs font-medium text-gray-700 mb-2">發票商品明細</label>
                         <div className="space-y-2 overflow-y-auto bg-gray-50 rounded p-2" style={{height:'240px'}}>
-                          {pendingReviews[currentReviewIndex].consolidatedItems?.map((g, idx) => (
+                          {pendingReviews[currentReviewIndex].consolidatedItems?.map((item, idx) => (
                             <div key={idx} className="bg-white p-2 rounded shadow-sm">
-                              <span className="text-xs text-gray-800">
-                                {g.name}{g.count>1? \` (\${g.count}項)\` : ''} — ${"{"}\`$\${formatTWD(g.totalAmount)}\`{"}"}
-                              </span>
+                              <span className="text-xs text-gray-800">{item}</span>
                             </div>
                           ))}
                         </div>
@@ -727,7 +710,7 @@
                       <div key={inv.invoiceNumber} className="bg-white border rounded-lg p-3 shadow-sm">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-3">
-                            <span className={\`inline-flex px-2 py-1 text-xs font-semibold rounded-full \${d?'bg-green-100 text-green-800': nd?'bg-red-100 text-red-800':'bg-yellow-100 text-yellow-800'}\`}>
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${d?'bg-green-100 text-green-800': nd?'bg-red-100 text-red-800':'bg-yellow-100 text-yellow-800'}`}>
                               {d ? '可扣抵' : nd ? '不可扣抵' : '待查'}
                             </span>
                             <span className="text-sm font-semibold text-gray-900">{inv.invoiceNumber}</span>
@@ -739,10 +722,8 @@
                         <div>
                           <h4 className="text-xs font-medium text-gray-700 mb-1">商品明細：</h4>
                           <div className="space-y-1">
-                            {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.map((g, i)=>(
-                              <div key={i} className="bg-gray-50 px-2 py-1 rounded text-xs text-gray-800">
-                                {g.name}{g.count>1? \` (\${g.count}項)\` : ''} — ${"{"}\`$\${formatTWD(g.totalAmount)}\`{"}"}
-                              </div>
+                            {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.map((item, i)=>(
+                              <div key={i} className="bg-gray-50 px-2 py-1 rounded text-xs text-gray-800">{item}</div>
                             )) : (
                               <div className="text-gray-400 italic text-xs">無商品資料</div>
                             )}
@@ -753,7 +734,7 @@
                   })}
                 </div>
 
-                <div className="text中心">
+                <div className="text-center">
                   <button onClick={handleConfirmCompletion}
                           className="bg-blue-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-600 transition-colors">
                     確認完成
@@ -768,17 +749,30 @@
                 <h2 className="text-lg font-bold mb-3">審核完成</h2>
                 <p className="text-sm text-gray-600 mb-4">所有發票已完成審核處理，可以下載結果</p>
 
-                {/* 已依要求移除「本次新增的參考資料」區塊 */}
+                {newlyAddedRefData.length>0 && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-left">
+                    <h3 className="text-sm font-semibold mb-2">本次新增的參考資料：</h3>
+                    <div className="text-xs text-gray-700">共新增 {newlyAddedRefData.length} 筆，送出狀態：{
+                      n8nAddStatus==='ok' ? '成功' : n8nAddStatus==='fail' ? '失敗' : '處理中'
+                    }</div>
+                    {n8nAddStatus==='fail' && (
+                      <div className="mt-2">
+                        <button onClick={retrySendToN8n}
+                                className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600">重新傳送</button>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {info && <p className="text-xs text-gray-500 mb-3">{info}</p>}
 
                 <div className="flex flex-col items-center gap-3">
                   <button onClick={downloadResults}
-                          className="w-full md:w-64 bg-green-100 text-green-900 px-4 py-2 text-sm rounded-lg hover:bg-green-200 transition-colors inline-flex items-center justify-center gap-2 border border-green-200">
-                    <Icon name="download" className="w-4 h-4" /> 下載處理結果
+                          className="w-full md:w-64 bg-green-500 text白 px-4 py-2 text-sm rounded-lg hover:bg-green-600 transition-colors inline-flex items-center justify-center gap-2">
+                    <Icon name="save" className="w-4 h-4" /> 下載處理結果
                   </button>
                   <button onClick={()=>setStep(5)}
-                          className="w-full md:w-64 bg-gray-100 text-gray-900 px-4 py-2 text-sm rounded-lg hover:bg-gray-200 transition-colors inline-flex items-center justify-center gap-2 border border-gray-200">
+                          className="w-full md:w-64 bg-gray-500 text白 px-4 py-2 text-sm rounded-lg hover:bg-gray-600 transition-colors inline-flex items-center justify-center gap-2">
                     返回結果列表
                   </button>
                   <button onClick={()=>{
@@ -789,7 +783,7 @@
                             setError(''); setNewlyAddedRefData([]);
                             setInfo(''); setN8nAddStatus(null); setN8nGetStatus(null); setRefData([]); setFixedRefData([]);
                           }}
-                          className="w-full md:w-64 bg-blue-100 text-blue-900 px-4 py-2 text-sm rounded-lg hover:bg-blue-200 transition-colors inline-flex items-center justify-center gap-2 border border-blue-200">
+                          className="w-full md:w-64 bg-blue-500 text白 px-4 py-2 text-sm rounded-lg hover:bg-blue-600 transition-colors inline-flex items-center justify-center gap-2">
                     處理新檔案
                   </button>
                 </div>
@@ -798,7 +792,7 @@
 
             {showEditModal && editingInvoice && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                <div className="bg-white rounded-lg p-4 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+                <div className="bg白 rounded-lg p-4 max-w-2xl w-full mx-4 max-h-96 overflow-y-auto">
                   <h3 className="text-sm font-bold mb-3">編輯發票審核結果</h3>
 
                   <div className="grid grid-cols-2 gap-3 mb-3">
@@ -820,10 +814,8 @@
                   <div className="mb-4">
                     <label className="block text-xs font-medium text-gray-700 mb-2">發票商品</label>
                     <div className="space-y-1 max-h-32 overflow-y-auto">
-                      {(editingInvoice.consolidatedItems||[]).map((g, i)=>(
-                        <div key={i} className="bg-gray-50 p-2 rounded text-xs">
-                          <span className="text-gray-800">{g.name}{g.count>1? \` (\${g.count}項)\` : ''} — ${"{"}\`$\${formatTWD(g.totalAmount)}\`{"}"}</span>
-                        </div>
+                      {(editingInvoice.consolidatedItems||[]).map((it, i)=>(
+                        <div key={i} className="bg-gray-50 p-2 rounded text-xs"><span className="text-gray-800">{it}</span></div>
                       ))}
                       {(!editingInvoice.consolidatedItems || !editingInvoice.consolidatedItems.length) && (
                         <p className="text-xs text-gray-500">無商品資料</p>
@@ -847,15 +839,15 @@
 
                   <div className="flex gap-3">
                     <button onClick={()=>handleEditDecision('deductible')}
-                            className="flex-1 bg-green-500 text-white px-3 py-2 text-xs rounded-lg hover:bg-green-600 transition-colors inline-flex items-center justify-center gap-1">
+                            className="flex-1 bg-green-500 text白 px-3 py-2 text-xs rounded-lg hover:bg-green-600 transition-colors inline-flex items-center justify-center gap-1">
                       <Icon name="check" className="w-3 h-3" />可扣抵
                     </button>
                     <button onClick={()=>handleEditDecision('non-deductible')}
-                            className="flex-1 bg-red-500 text-white px-3 py-2 text-xs rounded-lg hover:bg-red-600 transition-colors inline-flex items-center justify-center gap-1">
+                            className="flex-1 bg-red-500 text白 px-3 py-2 text-xs rounded-lg hover:bg-red-600 transition-colors inline-flex items-center justify-center gap-1">
                       <Icon name="x" className="w-3 h-3" />不可扣抵
                     </button>
                     <button onClick={closeEditModal}
-                            className="flex-1 bg-gray-500 text-white px-3 py-2 text-xs rounded-lg hover:bg-gray-600 transition-colors">
+                            className="flex-1 bg-gray-500 text白 px-3 py-2 text-xs rounded-lg hover:bg-gray-600 transition-colors">
                       取消
                     </button>
                   </div>
