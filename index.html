@@ -255,7 +255,8 @@
               reject(new Error('工作表 ' + sheetName + ' 資料不足')); return;
             }
             const rows = json.slice(1);
-            if (sheetName === 'Invoice' or sheetName === 'btb411w_xls1') {
+            const isInvoiceHeader = ['Invoice', 'btb411w_xls1'].includes(String(sheetName).trim());
+            if (isInvoiceHeader) {
               const processed = rows.map((row, idx) => ({
                 invoiceNumber: row[0] || '',
                 buyerNote:     row[1] || '',
