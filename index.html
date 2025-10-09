@@ -209,10 +209,24 @@
 
         try {
           ensureXLSXReady();
-          const invoiceSheetData  = await readExcelSheet(file,'Invoice');
-          const detailsSheetData  = await readExcelSheet(file,'Invoice_details');
+          // 嘗試讀取 Invoice 或 btb411w_xls1
+          let invoiceSheetData;
+          try {
+            invoiceSheetData = await readExcelSheet(file, 'Invoice');
+          } catch {
+            invoiceSheetData = await readExcelSheet(file, 'btb411w_xls1');
+          }
+        
+          // 嘗試讀取 Invoice_details 或 btb411w_xls2
+          let detailsSheetData;
+          try {
+            detailsSheetData = await readExcelSheet(file, 'Invoice_details');
+          } catch {
+            detailsSheetData = await readExcelSheet(file, 'btb411w_xls2');
+          }
+        
           if (!invoiceSheetData || !detailsSheetData) {
-            setError('無法讀取工作表，請確認檔案包含 Invoice 與 Invoice_details');
+            setError('無法讀取工作表，請確認檔案包含 Invoice / btb411w_xls1 與 Invoice_details / btb411w_xls2');
             return;
           }
           setOriginalInvoiceData(invoiceSheetData);
