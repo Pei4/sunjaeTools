@@ -106,7 +106,7 @@
       const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/get-ref-data';
       const headers = { 'X-API-Key': apiKey };
       try {
-        const res = await fetch(\`\${endpoint}?key=\${encodeURIComponent(apiKey)}\`, {
+        const res = await fetch(\`${endpoint}?key=${encodeURIComponent(apiKey)}\`, {
           method: 'POST',
           headers: { ...headers, 'Content-Type': 'application/json' },
           body: JSON.stringify({ customerId }),
@@ -116,7 +116,7 @@
         if (normalized) return normalized;
       } catch(e){}
       try {
-        const res = await fetch(\`\${endpoint}?key=\${encodeURIComponent(apiKey)}&customerId=\${encodeURIComponent(customerId)}\`, {
+        const res = await fetch(\`${endpoint}?key=${encodeURIComponent(apiKey)}&customerId=${encodeURIComponent(customerId)}\`, {
           method: 'GET',
           headers,
         });
@@ -132,13 +132,13 @@
       const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/add-ref-data';
       const headers = { 'X-API-Key': apiKey, 'Content-Type': 'application/json' };
       const payload = { customerId, rules };
-      const res = await fetch(\`\${endpoint}?key=\${encodeURIComponent(apiKey)}\`, {
+      const res = await fetch(\`${endpoint}?key=${encodeURIComponent(apiKey)}\`, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),
         keepalive: true
       });
-      if (!res.ok) throw new Error(\`n8n 回應非 2xx（HTTP \${res.status}）\`);
+      if (!res.ok) throw new Error(\`n8n 回應非 2xx（HTTP ${res.status}）\`);
       return await res.json().catch(() => ({}));
     }
 
@@ -580,7 +580,7 @@
           window.XLSX.utils.book_append_sheet(wb, ws2, "Invoice_details");
 
           const dateStr = new Date().toISOString().slice(0,10);
-          window.XLSX.writeFile(wb, \`\${companyId}_處理結果_\${dateStr}.xlsx\`);
+          window.XLSX.writeFile(wb, \`${companyId}_處理結果_${dateStr}.xlsx\`);
         } catch (e) {
           alert('下載失敗：' + (e?.message || String(e)));
         }
@@ -641,7 +641,7 @@
                           {refData.map((ref, idx) => (
                             <tr key={idx} className="border-b border-gray-200">
                               <td className="py-2 px-2 text-center">
-                                <span className={\`\${ref.deductable==='Yes'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'} inline-flex px-2 py-1 text-xs font-medium rounded-full\`}>
+                                <span className={\`${ref.deductable==='Yes'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'} inline-flex px-2 py-1 text-xs font-medium rounded-full\`}>
                                   {ref.deductable==='Yes'?'可扣抵':'不可扣抵'}
                                 </span>
                               </td>
@@ -700,7 +700,7 @@
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-700 mb-1">賣方資訊</label>
-                          <p className="text-sm font-semibold truncate" title={\`\${pendingReviews[currentReviewIndex].sellerId} \${pendingReviews[currentReviewIndex].sellerName}\`}>
+                          <p className="text-sm font-semibold truncate" title={\`${pendingReviews[currentReviewIndex].sellerId} ${pendingReviews[currentReviewIndex].sellerName}\`}>
                             {pendingReviews[currentReviewIndex].sellerId} {pendingReviews[currentReviewIndex].sellerName}
                           </p>
                         </div>
