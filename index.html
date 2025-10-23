@@ -105,7 +105,7 @@
       const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/get-ref-data';
       const headers = { 'X-API-Key': apiKey };
       try {
-        const res = await fetch(`${'${'}endpoint}?key=${'${'}encodeURIComponent(apiKey)}`, {
+        const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
           method: 'POST',
           headers: { ...headers, 'Content-Type': 'application/json' },
           body: JSON.stringify({ customerId }),
@@ -115,7 +115,7 @@
         if (normalized) return normalized;
       } catch(e){}
       try {
-        const res = await fetch(`${'${'}endpoint}?key=${'${'}encodeURIComponent(apiKey)}&customerId=${'${'}encodeURIComponent(customerId)}`, {
+        const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}&customerId=${encodeURIComponent(customerId)}`, {
           method: 'GET',
           headers,
         });
@@ -131,13 +131,13 @@
       const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/add-ref-data';
       const headers = { 'X-API-Key': apiKey, 'Content-Type': 'application/json' };
       const payload = { customerId, rules };
-      const res = await fetch(`${'${'}endpoint}?key=${'${'}encodeURIComponent(apiKey)}`, {
+      const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),
         keepalive: true
       });
-      if (!res.ok) throw new Error(`n8n 回應非 2xx（HTTP ${'${'}res.status}）`);
+      if (!res.ok) throw new Error(`n8n 回應非 2xx（HTTP ${res.status}）`);
       return await res.json().catch(() => ({}));
     }
 
@@ -557,7 +557,7 @@
           window.XLSX.utils.book_append_sheet(wb, ws2, "Invoice_details");
 
           const dateStr = new Date().toISOString().slice(0,10);
-          window.XLSX.writeFile(wb, `${'${'}companyId}_處理結果_${'${'}dateStr}.xlsx`);
+          window.XLSX.writeFile(wb, `${companyId}_處理結果_${dateStr}.xlsx`);
         } catch (e) {
           alert('下載失敗：' + (e?.message || String(e)));
         }
@@ -566,7 +566,7 @@
       return (
         <div className="max-w-6xl mx-auto px-2 py-4">
           <div className="w-full bg-gray-200 h-1 mb-3 rounded">
-            <div className="bg-blue-500 h-1 transition-all duration-300 rounded" style={{ width: `${'${'}(step/6)*100}%` }} />
+            <div className="bg-blue-500 h-1 transition-all duration-300 rounded" style={{ width: (step/6)*100 + '%' }} />
           </div>
 
           <div className="bg-white rounded-xl shadow-md py-3 px-8 work-container h-[95vh] flex flex-col">
@@ -618,7 +618,7 @@
                           {refData.map((ref, idx) => (
                             <tr key={idx} className="border-b border-gray-200">
                               <td className="py-2 px-2 text-center">
-                                <span className={`${'${'}ref.deductable==='Yes'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'} inline-flex px-2 py-1 text-xs font-medium rounded-full`}>
+                                <span className={`${ref.deductable==='Yes'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'} inline-flex px-2 py-1 text-xs font-medium rounded-full`}>
                                   {ref.deductable==='Yes'?'可扣抵':'不可扣抵'}
                                 </span>
                               </td>
@@ -648,7 +648,7 @@
                 <p className="text-sm text-gray-600 mb-4">正在根據參考資料進行自動判斷...</p>
                 <div className="mb-4">
                   <div className="w-full bg-gray-200 rounded-full h-2 mb-3">
-                    <div className="bg-blue-500 h-2 rounded-full transition-all duration-300" style={{ width: `${'${'}progress}%` }} />
+                    <div className="bg-blue-500 h-2 rounded-full transition-all duration-300" style={{ width: progress + '%' }} />
                   </div>
                   <p className="text-sm text-gray-600">處理中... {progress}%</p>
                 </div>
@@ -677,7 +677,7 @@
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-700 mb-1">賣方資訊</label>
-                          <p className="text-sm font-semibold truncate" title={`${'${'}pendingReviews[currentReviewIndex].sellerId} ${'${'}pendingReviews[currentReviewIndex].sellerName}`}>
+                          <p className="text-sm font-semibold truncate" title={`${pendingReviews[currentReviewIndex].sellerId} ${pendingReviews[currentReviewIndex].sellerName}`}>
                             {pendingReviews[currentReviewIndex].sellerId} {pendingReviews[currentReviewIndex].sellerName}
                           </p>
                         </div>
@@ -689,9 +689,9 @@
                           {pendingReviews[currentReviewIndex].consolidatedItems?.map((item, idx) => (
                             <div key={idx} className="bg-white p-2 rounded shadow-sm flex justify-between items-center">
                               <span className="text-xs text-gray-800">
-                                {item.name}{item.count>1?`（${'${'}item.count}項）`:''}
+                                {item.name}{item.count>1?`（${item.count}項）`:''}
                               </span>
-                              <span className="text-xs text-gray-900 font-semibold">￥{${'${'}$$formatAmount(item.amount)}}</span>
+                              <span className="text-xs text-gray-900 font-semibold">￥{$$formatAmount(item.amount)}</span>
                             </div>
                           ))}
                         </div>
@@ -739,7 +739,7 @@
                       <div key={inv.invoiceNumber} className="bg-white border rounded-lg p-3 shadow-sm">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-3">
-                            <span className={`${'${'}d?'bg-green-100 text-green-800': nd?'bg-red-100 text-red-800':'bg-yellow-100 text-yellow-800'} inline-flex px-2 py-1 text-xs font-semibold rounded-full`}>
+                            <span className={`${d?'bg-green-100 text-green-800': nd?'bg-red-100 text-red-800':'bg-yellow-100 text-yellow-800'} inline-flex px-2 py-1 text-xs font-semibold rounded-full`}>
                               {d ? '可扣抵' : nd ? '不可扣抵' : '待查'}
                             </span>
                             <span className="text-sm font-semibold text-gray-900">{inv.invoiceNumber}</span>
@@ -753,8 +753,8 @@
                           <div className="space-y-1">
                             {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.map((item, i)=>(
                               <div key={i} className="bg-gray-50 px-2 py-1 rounded text-xs text-gray-800 flex justify-between items-center">
-                                <span>{item.name}{item.count>1?`（${'${'}item.count}項）`:''}</span>
-                                <span className="font-semibold">￥{${'${'}$$formatAmount(item.amount)}}</span>
+                                <span>{item.name}{item.count>1?`（${item.count}項）`:''}</span>
+                                <span className="font-semibold">￥{$$formatAmount(item.amount)}</span>
                               </div>
                             )) : (
                               <div className="text-gray-400 italic text-xs">無商品資料</div>
@@ -847,8 +847,8 @@
                     <div className="space-y-1 max-h-32 overflow-y-auto">
                       {(editingInvoice.consolidatedItems||[]).map((it, i)=>(
                         <div key={i} className="bg-gray-50 p-2 rounded text-xs flex justify-between items-center">
-                          <span className="text-gray-800">{it.name}{it.count>1?`（${'${'}it.count}項）`:''}</span>
-                          <span className="font-semibold">￥{${'${'}$$formatAmount(it.amount)}}</span>
+                          <span className="text-gray-800">{it.name}{it.count>1?`（${it.count}項）`:''}</span>
+                          <span className="font-semibold">￥{${$$formatAmount(it.amount)}}</span>
                         </div>
                       ))}
                       {(!editingInvoice.consolidatedItems || !editingInvoice.consolidatedItems.length) && (
