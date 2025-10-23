@@ -190,6 +190,19 @@
         return res;
       };
 
+      // Consolidate item details with sum by name
+      const consolidateItemDetails = (details) => {
+        if (!Array.isArray(details) || !details.length) return [];
+        const sumMap = new Map();
+        for (const d of details) {
+          const name = d && d.name ? String(d.name) : '';
+          if (!name) continue;
+          const amt = (typeof d.amount === 'number') ? d.amount : Number(d.amount || 0);
+          sumMap.set(name, (sumMap.get(name) || 0) + (isFinite(amt) ? amt : 0));
+        }
+        return Array.from(sumMap.entries()).map(([name, amount]) => ({ name, amount }));
+      };
+
       // Consolidate item details with amount summation by name
       const consolidateItemDetails = (details) => {
         if (!Array.isArray(details) || !details.length) return [];
@@ -283,7 +296,8 @@
               const processed = rows.map((row, idx) => ({
                 invoiceNumber: row[0] || '',
                 itemName:      row[3] || '',
-                originalRow:   row,
+                                amount:        Number(row[7] ?? 0),
+originalRow:   row,
                 rowIndex:      idx + 2,
               })).filter(it => String(it.invoiceNumber||'').trim() && String(it.itemName||'').trim());
               resolve(processed);
@@ -366,10 +380,12 @@
               clearInterval(interval);
               const cleaned = invoiceData.map(inv => {
                 const invSellerId = String(inv.sellerId).trim();
-                const invItems = invoiceDetailsData
-                  .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
-                  .map(d => d.itemName)
-                  .filter(Boolean);
+                const invRawDetails = invoiceDetailsData
+                  .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim());
+                const invItemDetails = invRawDetails
+                  .map(d => ({ name: d.itemName, amount: (typeof d.amount==='number' ? d.amount : Number((d.originalRow ? d.originalRow[7] : 0) || 0)) }))
+                  .filter(it => it.name);
+                const invItems = invItemDetails.map(it => it.name);
                 if (!useRef || !useRef.length) {
                   return { ...inv, buyerNote:'待查', items:invItems, consolidatedItems:consolidateItems(invItems), consolidatedItemDetails: consolidateItemDetails(invItemDetails) };
                 }
@@ -751,101 +767,14 @@
                         <div>
                           <h4 className="text-xs font-medium text-gray-700 mb-1">商品明細：</h4>
                           <div className="space-y-1">
-                            {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.map((item, i)=>(
-                              <div key={i} className="bg-gray-50 px-2 py-1 rounded text-xs text-gray-800">{item}</div>
+                            {(inv.consolidatedItemDetails && inv.consolidatedItemDetails.length>0) ? inv.consolidatedItemDetails.map((it, i)=>(
+                              <div key={i} className="bg-gray-50 px-2 py-1 rounded text-xs text-gray-800 flex items-center justify-between">
+                                <span>{it.name}</span>
+                                <span>{Number(it.amount||0).toLocaleString()}</span>
+                              </div>
                             )) : (
                               <div className="text-gray-400 italic text-xs">無商品資料</div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="text-center">
-                  <button onClick={handleConfirmCompletion}
-                          className="bg-blue-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-600 transition-colors">
-                    確認完成
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {step===6 && (
-              <div className="text-center">
-                <Icon name="check" className="w-12 h-12 mx-auto mb-3 text-green-500" />
-                <h2 className="text-lg font-bold mb-3">審核完成</h2>
-                <p className="text-sm text-gray-600 mb-4">所有發票已完成審核處理，可以下載結果</p>
-
-                {newlyAddedRefData.length>0 && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-left">
-                    <h3 className="text-sm font-semibold mb-2">本次新增的參考資料：</h3>
-                    <div className="text-xs text-gray-700">共新增 {newlyAddedRefData.length} 筆，送出狀態：{
-                      n8nAddStatus==='ok' ? '成功' : n8nAddStatus==='fail' ? '失敗' : '處理中'
-                    }</div>
-                    {n8nAddStatus==='fail' && (
-                      <div className="mt-2">
-                        <button onClick={retrySendToN8n}
-                                className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600">重新傳送</button>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {info && <p className="text-xs text-gray-500 mb-3">{info}</p>}
-
-                <div className="flex flex-col items-center gap-3">
-                  <button onClick={downloadResults}
-                          className="w-full md:w-64 bg-green-500 text白 px-4 py-2 text-sm rounded-lg hover:bg-green-600 transition-colors inline-flex items-center justify-center gap-2">
-                    <Icon name="save" className="w-4 h-4" /> 下載處理結果
-                  </button>
-                  <button onClick={()=>setStep(5)}
-                          className="w-full md:w-64 bg-gray-500 text白 px-4 py-2 text-sm rounded-lg hover:bg-gray-600 transition-colors inline-flex items-center justify-center gap-2">
-                    返回結果列表
-                  </button>
-                  <button onClick={()=>{
-                            setStep(1); setUploadedFile(null);
-                            setInvoiceData([]); setInvoiceDetailsData([]);
-                            setOriginalInvoiceData([]); setOriginalDetailsData([]);
-                            setPendingReviews([]); setCurrentReviewIndex(0);
-                            setError(''); setNewlyAddedRefData([]);
-                            setInfo(''); setN8nAddStatus(null); setN8nGetStatus(null); setRefData([]); setFixedRefData([]);
-                          }}
-                          className="w-full md:w-64 bg-blue-500 text白 px-4 py-2 text-sm rounded-lg hover:bg-blue-600 transition-colors inline-flex items-center justify-center gap-2">
-                    處理新檔案
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {showEditModal && editingInvoice && (
-              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                <div className="bg-white rounded-lg p-4 max-w-2xl w-full mx-4 max-h-96 overflow-y-auto">
-                  <h3 className="text-sm font-bold mb-3">編輯發票審核結果</h3>
-
-                  <div className="grid grid-cols-2 gap-3 mb-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">發票號碼</label>
-                      <p className="text-sm font-semibold">{editingInvoice.invoiceNumber}</p>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">賣方統一編號</label>
-                      <p className="text-sm font-semibold">{editingInvoice.sellerId}</p>
-                    </div>
-                  </div>
-
-                  <div className="mb-3">
-                    <label className="block text-xs font-medium text-gray-700 mb-1">賣方名稱</label>
-                    <p className="text-sm">{editingInvoice.sellerName}</p>
-                  </div>
-
-                  <div className="mb-4">
-                    <label className="block text-xs font-medium text-gray-700 mb-2">發票商品</label>
-                    <div className="space-y-1 max-h-32 overflow-y-auto">
-                      {(editingInvoice.consolidatedItems||[]).map((it, i)=>(
-                        <div key={i} className="bg-gray-50 p-2 rounded text-xs"><span className="text-gray-800">{it}</span></div>
-                      ))}
+                            )}}
                       {(!editingInvoice.consolidatedItemDetails || !editingInvoice.consolidatedItemDetails.length) && (
                         <p className="text-xs text-gray-500">無商品資料</p>
                       )}
