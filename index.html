@@ -40,6 +40,11 @@
   <script type="text/babel" data-presets="env,react">
     const { useState, useEffect } = React;
 
+    const $$formatAmount = (n) => {
+      const num = (typeof n === 'number') ? n : Number(n||0);
+      try { return num.toLocaleString(); } catch { return String(num); }
+    };
+
     function Icon({name, className="w-5 h-5"}) {
       const icons = {
         upload: <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="M5 20h14v-2H5v2Zm7-18l-5 5h3v6h4V7h3l-5-5Z"/></svg>,
@@ -311,7 +316,7 @@
               .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
               .map(d => d.itemName)
               .filter(Boolean);
-            return { ...inv, buyerNote:'待查', items:invItems, consolidatedItems:consolidateItems(invItems) };
+            return { ...inv, buyerNote:'待查', items:invItems, itemDetails: invItemDetails, consolidatedItems:consolidateItems(invItems) };
           });
           setInvoiceData(cleaned);
           setPendingReviews(cleaned);
@@ -326,7 +331,7 @@
               .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
               .map(d => d.itemName)
               .filter(Boolean);
-            return { ...inv, buyerNote:'待查', items:invItems, consolidatedItems:consolidateItems(invItems) };
+            return { ...inv, buyerNote:'待查', items:invItems, itemDetails: invItemDetails, consolidatedItems:consolidateItems(invItems) };
           });
           setInvoiceData(cleaned);
           setPendingReviews(cleaned);
@@ -358,7 +363,7 @@
                   .map(d => d.itemName)
                   .filter(Boolean);
                 if (!useRef || !useRef.length) {
-                  return { ...inv, buyerNote:'待查', items:invItems, consolidatedItems:consolidateItems(invItems) };
+                  return { ...inv, buyerNote:'待查', items:invItems, itemDetails: invItemDetails, consolidatedItems:consolidateItems(invItems) };
                 }
                 const yesRefs = useRef.filter(r => r.deductable === 'Yes');
                 const noRefs  = useRef.filter(r => r.deductable === 'No');
@@ -807,7 +812,7 @@
 
             {showEditModal && editingInvoice && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                <div className="bg白 rounded-lg p-4 max-w-2xl w-full mx-4 max-h-96 overflow-y-auto">
+                <div className="bg-white rounded-lg p-4 max-w-2xl w-full mx-4 max-h-96 overflow-y-auto">
                   <h3 className="text-sm font-bold mb-3">編輯發票審核結果</h3>
 
                   <div className="grid grid-cols-2 gap-3 mb-3">
