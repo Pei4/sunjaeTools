@@ -40,6 +40,23 @@
   <script type="text/babel" data-presets="env,react">
     const { useState, useEffect } = React;
 
+    function ItemDetailsList({ items }) {
+      if (!items || !items.length) {
+        return (<div className="text-gray-400 italic text-xs">無商品資料</div>);
+      }
+      return (
+        <div>
+          {items.map((it, i)=> (
+            <div key={i} className="bg-gray-50 px-2 py-1 rounded text-xs text-gray-800 flex items-center justify-between">
+              <span>{it.name}</span>
+              <span>{Number((it.amount||0)).toLocaleString()}</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+
     function Icon({name, className="w-5 h-5"}) {
       const icons = {
         upload: <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="M5 20h14v-2H5v2Zm7-18l-5 5h3v6h4V7h3l-5-5Z"/></svg>,
@@ -696,12 +713,8 @@ originalRow:   row,
 
                       <div className="mb-3">
                         <label className="block text-xs font-medium text-gray-700 mb-2">發票商品明細</label>
-                        <div className="space-y-2 overflow-y-auto bg-gray-50 rounded p-2" style={{height:'240px'}}>
-                          {pendingReviews[currentReviewIndex].consolidatedItemDetails?.map((it, idx)=>(
-                            <div key={idx} className="bg-white p-2 rounded shadow-sm flex items-center justify-between">
-                              <span className="text-xs text-gray-800">{it.name}</span>
-                              <span className="text-xs text-gray-600">{Number(it.amount||0).toLocaleString()}</span>
-                            </div>
+                        <div className="space-y-2 overflow-y-auto bg-gray-50 rounded p-2" style={{height:'240px'}}><ItemDetailsList items={pendingReviews[currentReviewIndex].consolidatedItemDetails} />
+</div>
                           ))}
                         </div>
                       </div>
@@ -759,12 +772,8 @@ originalRow:   row,
 
                         <div>
                           <h4 className="text-xs font-medium text-gray-700 mb-1">商品明細：</h4>
-                          <div className="space-y-1">
-                            {(inv.consolidatedItemDetails && inv.consolidatedItemDetails.length>0) ? inv.consolidatedItemDetails.map((it, i)=>(
-                              <div key={i} className="bg-gray-50 px-2 py-1 rounded text-xs text-gray-800 flex items-center justify-between">
-                                <span>{it.name}</span>
-                                <span>{Number(it.amount||0).toLocaleString()}</span>
-                              </div>
+                          <div className="space-y-1"><ItemDetailsList items={inv.consolidatedItemDetails} />
+</div>
                             )) : (
                               <div className="text-gray-400 italic text-xs">無商品資料</div>
                             )}}
