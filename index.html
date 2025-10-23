@@ -848,7 +848,7 @@
                       {(editingInvoice.consolidatedItems||[]).map((it, i)=>(
                         <div key={i} className="bg-gray-50 p-2 rounded text-xs flex justify-between items-center">
                           <span className="text-gray-800">{it.name}{it.count>1?`（${it.count}項）`:''}</span>
-                          <span className="font-semibold">￥{${$$formatAmount(it.amount)}}</span>
+                          <span className="font-semibold">￥{$$formatAmount(it.amount)}</span>
                         </div>
                       ))}
                       {(!editingInvoice.consolidatedItems || !editingInvoice.consolidatedItems.length) && (
