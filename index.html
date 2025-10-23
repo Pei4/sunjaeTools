@@ -39,14 +39,21 @@
 
   <script type="text/babel" data-presets="env,react">
     const { useState, useEffect } = React;
-
+    console.log('[boot] inline app script loaded');
+    // === Helpers injected ===
+    const normalizeAmount = (v) => {
+      const s = String(v ?? '').replace(/,/g,'').replace(/\s+/g,'').replace(/^NT\$|元$/g,'');
+      const n = parseFloat(s);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const isInvoiceSheet = (name) => /^(invoice|btb411w_xls1)$/i.test(String(name).trim());
+    const isDetailSheet  = (name) => /^(invoice_details|btb411w_xls2)$/i.test(String(name).trim());
 
     function ItemDetailsList({ items }) {
-      try { console.debug('[ItemDetailsList] items size:', items?.length, 'sample:', (items||[]).slice(0,5)); } catch(e) {}
-
-      if (!items || !items.length) return (
-        <div className="text-gray-400 italic text-xs">無商品資料</div>
-      );
+      try { console.log('[ItemDetailsList] size:', items?.length, 'sample:', (items||[]).slice(0,5)); } catch(e) {}
+      if (!items || !items.length) {
+        return (<div className="text-gray-400 italic text-xs">無商品資料</div>);
+      }
       return (
         <div>
           {items.map((it, i)=> (
@@ -210,18 +217,6 @@
         return res;
       };
 
-      const consolidateItemDetails = (details) => {
-        if (!Array.isArray(details) || !details.length) return [];
-        const m = new Map();
-        for (const d of details) {
-          const name = (d && d.name) ? String(d.name) : '';
-          if (!name) continue;
-          const amt = (typeof d.amount === 'number') ? d.amount : Number(String(d.amount||'').replace(/,/g,''));
-          m.set(name, (m.get(name)||0) + (isFinite(amt) ? amt : 0));
-        }
-        return Array.from(m.entries()).map(([name, amount]) => ({ name, amount }));
-      };
-
       const ensureXLSXReady = ()=>{
         if (!window.XLSX) {
           throw new Error('XLSX 函式庫尚未載入完成，請稍後再試或重新整理頁面');
@@ -343,12 +338,11 @@
               .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
               .map(d => d.itemName)
               .filter(Boolean);
-            try { console.debug('[initialDataCleaning] consolidatedItemDetails size:', consolidateItemDetails(invItemDetails)?.length); } catch(e) {}
-                return { ...inv, buyerNote:'待查', items:invItems, consolidatedItems:consolidateItems(invItems), consolidatedItemDetails: consolidateItemDetails(invItemDetails) };
+            return { ...inv, buyerNote:'待查', items:invItems, consolidatedItems:consolidateItems(invItems), consolidatedItemDetails };
           });
           setInvoiceData(cleaned);
           setPendingReviews(cleaned);
-        try { console.debug('[initialDataCleaning] pendingReviews size after set:', (cleaned||[]).length); } catch(e) {}
+                try { console.log('[initialDataCleaning] pendingReviews size after set:', (cleaned||[]).length); } catch(e) {}
           setStep(4);
           return;
         }
@@ -360,12 +354,11 @@
               .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
               .map(d => d.itemName)
               .filter(Boolean);
-            try { console.debug('[initialDataCleaning] consolidatedItemDetails size:', consolidateItemDetails(invItemDetails)?.length); } catch(e) {}
-                return { ...inv, buyerNote:'待查', items:invItems, consolidatedItems:consolidateItems(invItems), consolidatedItemDetails: consolidateItemDetails(invItemDetails) };
+            return { ...inv, buyerNote:'待查', items:invItems, consolidatedItems:consolidateItems(invItems), consolidatedItemDetails };
           });
           setInvoiceData(cleaned);
           setPendingReviews(cleaned);
-        try { console.debug('[initialDataCleaning] pendingReviews size after set:', (cleaned||[]).length); } catch(e) {}
+                try { console.log('[initialDataCleaning] pendingReviews size after set:', (cleaned||[]).length); } catch(e) {}
           setStep(4);
         } else {
           const sorted = [...data].sort((a,b)=>{
@@ -392,16 +385,13 @@
                 const invRawDetails = invoiceDetailsData
                   .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim());
                 const invItemDetails = invRawDetails
-                  .map(d => ({ name: d.itemName, amount: (typeof d.amount==='number' ? d.amount : Number(String((d.originalRow?d.originalRow[7]:0)||0).replace(/,/g,''))) }))
+                  .map(d => ({ name: d.itemName, amount: (typeof d.amount==='number' && Number.isFinite(d.amount)) ? d.amount : normalizeAmount(d?.originalRow?.[7]) }))
                   .filter(it => it.name);
                 const invItems = invItemDetails.map(it => it.name);
-                try { console.debug('[initialDataCleaning] invNumber:', inv.invoiceNumber, 'rawDetails:', invRawDetails.slice(0,5)); } catch(e) {}
-                try { console.debug('[initialDataCleaning] itemDetails sample:', invItemDetails.slice(0,5)); } catch(e) {}
-                try { console.debug('[initialDataCleaning] items(sample):', invItems.slice(0,5)); } catch(e) {}
-
+                const consolidatedItemDetails = (() => { const m=new Map(); for(const it of invItemDetails){ const name=String(it.name||'').trim(); if(!name) continue; const amt=Number.isFinite(it.amount)?it.amount:0; m.set(name,(m.get(name)||0)+amt);} return Array.from(m.entries()).map(([name,amount])=>({name,amount})); })();
+                try { console.log('[initialDataCleaning] invNumber:', inv.invoiceNumber, 'rawDetails size:', invRawDetails.length, 'itemDetails sample:', invItemDetails.slice(0,5), 'consolidated size:', consolidatedItemDetails.length); } catch(e) {}
                 if (!useRef || !useRef.length) {
-                  try { console.debug('[initialDataCleaning] consolidatedItemDetails size:', consolidateItemDetails(invItemDetails)?.length); } catch(e) {}
-                return { ...inv, buyerNote:'待查', items:invItems, consolidatedItems:consolidateItems(invItems), consolidatedItemDetails: consolidateItemDetails(invItemDetails) };
+                  return { ...inv, buyerNote:'待查', items:invItems, consolidatedItems:consolidateItems(invItems), consolidatedItemDetails };
                 }
                 const yesRefs = useRef.filter(r => r.deductable === 'Yes');
                 const noRefs  = useRef.filter(r => r.deductable === 'No');
@@ -430,7 +420,7 @@
               setInvoiceData(cleaned);
               const pending = cleaned.filter(i => i.buyerNote === '待查');
               setPendingReviews(pending);
-        try { console.debug('[initialDataCleaning] pendingReviews size after set:', (pending||[]).length); } catch(e) {}
+                try { console.log('[initialDataCleaning] pendingReviews size after set:', (pending||[]).length); } catch(e) {}
               setStep(pending.length ? 4 : 5);
               return 100;
             }
@@ -483,10 +473,10 @@
         setInvoiceData(reprocessed);
         const still = reprocessed.filter(i => i.buyerNote === '待查');
         if (!still.length) { setPendingReviews([]);
-        try { console.debug('[initialDataCleaning] pendingReviews size after set:', ([]||[]).length); } catch(e) {} setStep(5); setCurrentReviewIndex(0); }
+                try { console.log('[initialDataCleaning] pendingReviews size after set:', ([]||[]).length); } catch(e) {} setStep(5); setCurrentReviewIndex(0); }
         else {
           setPendingReviews(still);
-        try { console.debug('[initialDataCleaning] pendingReviews size after set:', (still||[]).length); } catch(e) {}
+                try { console.log('[initialDataCleaning] pendingReviews size after set:', (still||[]).length); } catch(e) {}
           const idx = still.findIndex(i => i.invoiceNumber === currentNo);
           setStep(4);
           setCurrentReviewIndex(idx === -1 ? 0 : idx);
@@ -841,7 +831,7 @@
                             setInvoiceData([]); setInvoiceDetailsData([]);
                             setOriginalInvoiceData([]); setOriginalDetailsData([]);
                             setPendingReviews([]);
-        try { console.debug('[initialDataCleaning] pendingReviews size after set:', ([]||[]).length); } catch(e) {} setCurrentReviewIndex(0);
+                try { console.log('[initialDataCleaning] pendingReviews size after set:', ([]||[]).length); } catch(e) {} setCurrentReviewIndex(0);
                             setError(''); setNewlyAddedRefData([]);
                             setInfo(''); setN8nAddStatus(null); setN8nGetStatus(null); setRefData([]); setFixedRefData([]);
                           }}
