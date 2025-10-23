@@ -48,9 +48,9 @@
       if (typeof v === 'number') return v;
       const s = String(v ?? '')
         .replace(/,/g, '')
-        .replace(/\\s+/g, '')
-        .replace(/[NT\\$\\u00A0]/gi, '')  // 移除貨幣符號與不換行空白
-        .replace(/[^0-9.\\-]/g, '');
+        .replace(/\s+/g, '')
+        .replace(/[NT$\xA0]/gi, '')  // 改用 \xA0 避免 \u escape 問題
+        .replace(/[^0-9.\-]/g, '');
       const n = Number(s || 0);
       return Number.isFinite(n) ? n : 0;
     };
@@ -59,7 +59,7 @@
       const icons = {
         upload: <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="M5 20h14v-2H5v2Zm7-18l-5 5h3v6h4V7h3l-5-5Z"/></svg>,
         file:   <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12V8z"/><path fill="#ffffff33" d="M14 2v6h6"/></svg>,
-        db:     <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="M12 3c-4.97 0-9 1.79-9 4v10c0 2.21 4.03 4 9 4s9-1.79 9-4V7c0-2.21-4.03-4-9-4Zm0 2c3.86 0 7 .9 7 2s-3.14 2-7 2-7-.9-7-2 3.14-2 7-2Zm7 5.09V12c0 1.1-3.14 2-7 2s-7-.9-7-2V10.09C7.21 10.68 9.45 11 12 11s4.79-.32 7-0.91Zm0 5V17c0 1.1-3.14 2-7 2s-7-.9-7-2v-1.91C7.21 15.68 9.45 16 12 16s4.79-.32 7-0.91Z"/></svg>,
+        db:     <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="M12 3c-4.97 0  -9 1.79-9 4v10c0 2.21 4.03 4 9 4s9-1.79 9-4V7c0-2.21-4.03-4-9-4Zm0 2c3.86 0 7 .9 7 2s-3.14 2-7 2-7-.9-7-2 3.14-2 7-2Zm7 5.09V12c0 1.1-3.14 2-7 2s-7-.9-7-2V10.09C7.21 10.68 9.45 11 12 11s4.79-.32 7-0.91Zm0 5V17c0 1.1-3.14 2-7 2s-7-.9-7-2v-1.91C7.21 15.68 9.45 16 12 16s4.79-.32 7-0.91Z"/></svg>,
         check:  <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>,
         x:      <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="m19 6.41-1.41-1.41L12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>,
         save:   <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="M17 3H5a2 2 0 0 0-2 2v14l4-4h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z"/></svg>,
@@ -105,7 +105,7 @@
       const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/get-ref-data';
       const headers = { 'X-API-Key': apiKey };
       try {
-        const res = await fetch(\`\${endpoint}?key=\${encodeURIComponent(apiKey)}\`, {
+        const res = await fetch(`${'${'}endpoint}?key=${'${'}encodeURIComponent(apiKey)}`, {
           method: 'POST',
           headers: { ...headers, 'Content-Type': 'application/json' },
           body: JSON.stringify({ customerId }),
@@ -115,7 +115,7 @@
         if (normalized) return normalized;
       } catch(e){}
       try {
-        const res = await fetch(\`\${endpoint}?key=\${encodeURIComponent(apiKey)}&customerId=\${encodeURIComponent(customerId)}\`, {
+        const res = await fetch(`${'${'}endpoint}?key=${'${'}encodeURIComponent(apiKey)}&customerId=${'${'}encodeURIComponent(customerId)}`, {
           method: 'GET',
           headers,
         });
@@ -131,13 +131,13 @@
       const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/add-ref-data';
       const headers = { 'X-API-Key': apiKey, 'Content-Type': 'application/json' };
       const payload = { customerId, rules };
-      const res = await fetch(\`\${endpoint}?key=\${encodeURIComponent(apiKey)}\`, {
+      const res = await fetch(`${'${'}endpoint}?key=${'${'}encodeURIComponent(apiKey)}`, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),
         keepalive: true
       });
-      if (!res.ok) throw new Error(\`n8n 回應非 2xx（HTTP \${res.status}）\`);
+      if (!res.ok) throw new Error(`n8n 回應非 2xx（HTTP ${'${'}res.status}）`);
       return await res.json().catch(() => ({}));
     }
 
@@ -200,7 +200,6 @@
           }
           let name = cur.name;
           if (similarIdx.length>1){
-            // 取名稱最短者
             name = similarIdx.map(k=>items[k].name).reduce((x,y)=>x.length<y.length?x:y);
           }
           const sum = similarIdx.reduce((acc,k)=>acc + (Number(items[k].amount)||0), 0);
@@ -235,7 +234,6 @@
           } catch {
             invoiceSheetData = await readExcelSheet(file, 'btb411w_xls1');
           }
-        
           // 讀取 Invoice_details 或 btb411w_xls2
           let detailsSheetData;
           try {
@@ -243,7 +241,6 @@
           } catch {
             detailsSheetData = await readExcelSheet(file, 'btb411w_xls2');
           }
-        
           if (!invoiceSheetData || !detailsSheetData) {
             setError('無法讀取工作表，請確認檔案包含 Invoice / btb411w_xls1 與 Invoice_details / btb411w_xls2');
             return;
@@ -289,7 +286,7 @@
               const processed = rows.map((row, idx) => ({
                 invoiceNumber: row[0] || '',
                 itemName:      row[3] || '',
-                amount:        $$parseAmount(row[7]), // 讀取 H 欄金額並轉數字
+                amount:        $$parseAmount(row[7]),
                 originalRow:   row,
                 rowIndex:      idx + 2,
               })).filter(it => String(it.invoiceNumber||'').trim() && String(it.itemName||'').trim());
@@ -378,7 +375,6 @@
                   .map(d => ({ name: d.itemName, amount: d.amount }))
                   .filter(it => it.name);
 
-                // 文字比對仍用品名集合
                 const itemNames = rawItems.map(it => it.name);
                 if (!useRef || !useRef.length) {
                   return { ...inv, buyerNote:'待查', items:rawItems, consolidatedItems:consolidateItems(rawItems) };
@@ -561,7 +557,7 @@
           window.XLSX.utils.book_append_sheet(wb, ws2, "Invoice_details");
 
           const dateStr = new Date().toISOString().slice(0,10);
-          window.XLSX.writeFile(wb, \`\${companyId}_處理結果_\${dateStr}.xlsx\`);
+          window.XLSX.writeFile(wb, `${'${'}companyId}_處理結果_${'${'}dateStr}.xlsx`);
         } catch (e) {
           alert('下載失敗：' + (e?.message || String(e)));
         }
@@ -570,20 +566,17 @@
       return (
         <div className="max-w-6xl mx-auto px-2 py-4">
           <div className="w-full bg-gray-200 h-1 mb-3 rounded">
-            <div className="bg-blue-500 h-1 transition-all duration-300 rounded" style={{ width: `${(step/6)*100}%` }} />
+            <div className="bg-blue-500 h-1 transition-all duration-300 rounded" style={{ width: `${'${'}(step/6)*100}%` }} />
           </div>
 
           <div className="bg-white rounded-xl shadow-md py-3 px-8 work-container h-[95vh] flex flex-col">
             {step===1 && (
               <div className="text-center min-h-96">
-                <Icon name="upload" className="w-12 h-12 mx-auto mb-3 text-blue-500" />
                 <h2 className="text-lg font-bold mb-3">上傳發票檔案</h2>
-                <p className="text-sm text-gray-600 mb-4">請上傳當期的 Excel 檔案（檔名前 8 碼為公司統編）</p>
                 <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 mb-3">
                   <input type="file" accept=".xlsx" onChange={handleFileUpload} className="hidden" id="file-upload" />
                   <label htmlFor="file-upload" className="cursor-pointer">
                     <div className="text-center">
-                      <Icon name="file" className="w-8 h-8 mx-auto mb-2 text-gray-400" />
                       <p className="text-sm text-gray-500">點擊選擇檔案或拖曳檔案至此</p>
                       <p className="text-xs text-gray-400 mt-2">支援 .xlsx 格式（需含 Invoice 與 Invoice_details 工作表）</p>
                     </div>
@@ -591,10 +584,7 @@
                 </div>
                 {error && (
                   <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 text-left">
-                    <div className="flex items-center">
-                      <Icon name="warn" className="w-4 h-4 text-red-500 mr-2" />
-                      <p className="text-xs text-red-800">{error}</p>
-                    </div>
+                    <p className="text-xs text-red-800">{error}</p>
                   </div>
                 )}
                 {uploadedFile && !error && (
@@ -610,7 +600,6 @@
 
             {step===2 && (
               <div className="text-center min-h-96">
-                <Icon name="db" className="w-12 h-12 mx-auto mb-3 text-blue-500" />
                 <h2 className="text-lg font-bold mb-3">參考資料</h2>
                 {info && <p className="text-sm text-gray-600 mb-4">{info}</p>}
                 {(refData && refData.length>0) ? (
@@ -629,7 +618,7 @@
                           {refData.map((ref, idx) => (
                             <tr key={idx} className="border-b border-gray-200">
                               <td className="py-2 px-2 text-center">
-                                <span className={\`inline-flex px-2 py-1 text-xs font-medium rounded-full \${ref.deductable==='Yes'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}\`}>
+                                <span className={`${'${'}ref.deductable==='Yes'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'} inline-flex px-2 py-1 text-xs font-medium rounded-full`}>
                                   {ref.deductable==='Yes'?'可扣抵':'不可扣抵'}
                                 </span>
                               </td>
@@ -659,7 +648,7 @@
                 <p className="text-sm text-gray-600 mb-4">正在根據參考資料進行自動判斷...</p>
                 <div className="mb-4">
                   <div className="w-full bg-gray-200 rounded-full h-2 mb-3">
-                    <div className="bg-blue-500 h-2 rounded-full transition-all duration-300" style={{ width: `${progress}%` }} />
+                    <div className="bg-blue-500 h-2 rounded-full transition-all duration-300" style={{ width: `${'${'}progress}%` }} />
                   </div>
                   <p className="text-sm text-gray-600">處理中... {progress}%</p>
                 </div>
@@ -670,7 +659,6 @@
               <div className="flex-1 overflow-y-auto">
                 {pendingReviews.length===0 ? (
                   <div className="text-center">
-                    <Icon name="check" className="w-12 h-12 mx-auto mb-3 text-green-500" />
                     <h2 className="text-lg font-bold mb-3">無待審核項目</h2>
                     <button onClick={()=>setStep(5)} className="bg-blue-500 text-white px-4 py-2 text-sm rounded-lg">查看結果</button>
                   </div>
@@ -689,7 +677,7 @@
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-700 mb-1">賣方資訊</label>
-                          <p className="text-sm font-semibold truncate" title={`${pendingReviews[currentReviewIndex].sellerId} ${pendingReviews[currentReviewIndex].sellerName}`}>
+                          <p className="text-sm font-semibold truncate" title={`${'${'}pendingReviews[currentReviewIndex].sellerId} ${'${'}pendingReviews[currentReviewIndex].sellerName}`}>
                             {pendingReviews[currentReviewIndex].sellerId} {pendingReviews[currentReviewIndex].sellerName}
                           </p>
                         </div>
@@ -701,9 +689,9 @@
                           {pendingReviews[currentReviewIndex].consolidatedItems?.map((item, idx) => (
                             <div key={idx} className="bg-white p-2 rounded shadow-sm flex justify-between items-center">
                               <span className="text-xs text-gray-800">
-                                {item.name}{item.count>1?`（${item.count}項）`:''}
+                                {item.name}{item.count>1?`（${'${'}item.count}項）`:''}
                               </span>
-                              <span className="text-xs text-gray-900 font-semibold">￥{$$formatAmount(item.amount)}</span>
+                              <span className="text-xs text-gray-900 font-semibold">￥{${'${'}$$formatAmount(item.amount)}}</span>
                             </div>
                           ))}
                         </div>
@@ -725,12 +713,12 @@
 
                     <div className="h-12 flex gap-3 items-center flex-shrink-0">
                       <button onClick={()=>handleReviewDecision('deductible')}
-                              className="flex-1 bg-green-500 text-white px-4 py-2 text-xs rounded-lg hover:bg-green-600 transition-colors flex items-center justify-center gap-2">
-                        <Icon name="check" className="w-3 h-3" />可扣抵
+                              className="flex-1 bg-green-500 text-white px-4 py-2 text-xs rounded-lg hover:bg-green-600 transition-colors">
+                        可扣抵
                       </button>
                       <button onClick={()=>handleReviewDecision('non-deductible')}
-                              className="flex-1 bg-red-500 text-white px-4 py-2 text-xs rounded-lg hover:bg-red-600 transition-colors flex items-center justify-center gap-2">
-                        <Icon name="x" className="w-3 h-3" />不可扣抵
+                              className="flex-1 bg-red-500 text-white px-4 py-2 text-xs rounded-lg hover:bg-red-600 transition-colors">
+                        不可扣抵
                       </button>
                     </div>
                   </div>
@@ -751,7 +739,7 @@
                       <div key={inv.invoiceNumber} className="bg-white border rounded-lg p-3 shadow-sm">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-3">
-                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${d?'bg-green-100 text-green-800': nd?'bg-red-100 text-red-800':'bg-yellow-100 text-yellow-800'}`}>
+                            <span className={`${'${'}d?'bg-green-100 text-green-800': nd?'bg-red-100 text-red-800':'bg-yellow-100 text-yellow-800'} inline-flex px-2 py-1 text-xs font-semibold rounded-full`}>
                               {d ? '可扣抵' : nd ? '不可扣抵' : '待查'}
                             </span>
                             <span className="text-sm font-semibold text-gray-900">{inv.invoiceNumber}</span>
@@ -765,8 +753,8 @@
                           <div className="space-y-1">
                             {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.map((item, i)=>(
                               <div key={i} className="bg-gray-50 px-2 py-1 rounded text-xs text-gray-800 flex justify-between items-center">
-                                <span>{item.name}{item.count>1?`（${item.count}項）`:''}</span>
-                                <span className="font-semibold">￥{$$formatAmount(item.amount)}</span>
+                                <span>{item.name}{item.count>1?`（${'${'}item.count}項）`:''}</span>
+                                <span className="font-semibold">￥{${'${'}$$formatAmount(item.amount)}}</span>
                               </div>
                             )) : (
                               <div className="text-gray-400 italic text-xs">無商品資料</div>
@@ -789,7 +777,6 @@
 
             {step===6 && (
               <div className="text-center">
-                <Icon name="check" className="w-12 h-12 mx-auto mb-3 text-green-500" />
                 <h2 className="text-lg font-bold mb-3">審核完成</h2>
                 <p className="text-sm text-gray-600 mb-4">所有發票已完成審核處理，可以下載結果</p>
 
@@ -812,11 +799,11 @@
 
                 <div className="flex flex-col items-center gap-3">
                   <button onClick={downloadResults}
-                          className="w-full md:w-64 bg-green-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-green-600 transition-colors inline-flex items-center justify-center gap-2">
-                    <Icon name="save" className="w-4 h-4" /> 下載處理結果
+                          className="w-full md:w-64 bg-green-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-green-600 transition-colors">
+                    下載處理結果
                   </button>
                   <button onClick={()=>setStep(5)}
-                          className="w-full md:w-64 bg-gray-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-gray-600 transition-colors inline-flex items-center justify-center gap-2">
+                          className="w-full md:w-64 bg-gray-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-gray-600 transition-colors">
                     返回結果列表
                   </button>
                   <button onClick={()=>{
@@ -827,7 +814,7 @@
                             setError(''); setNewlyAddedRefData([]);
                             setInfo(''); setN8nAddStatus(null); setN8nGetStatus(null); setRefData([]); setFixedRefData([]);
                           }}
-                          className="w-full md:w-64 bg-blue-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-600 transition-colors inline-flex items-center justify-center gap-2">
+                          className="w-full md:w-64 bg-blue-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-600 transition-colors">
                     處理新檔案
                   </button>
                 </div>
@@ -860,8 +847,8 @@
                     <div className="space-y-1 max-h-32 overflow-y-auto">
                       {(editingInvoice.consolidatedItems||[]).map((it, i)=>(
                         <div key={i} className="bg-gray-50 p-2 rounded text-xs flex justify-between items-center">
-                          <span className="text-gray-800">{it.name}{it.count>1?`（${it.count}項）`:''}</span>
-                          <span className="font-semibold">￥{$$formatAmount(it.amount)}</span>
+                          <span className="text-gray-800">{it.name}{it.count>1?`（${'${'}it.count}項）`:''}</span>
+                          <span className="font-semibold">￥{${'${'}$$formatAmount(it.amount)}}</span>
                         </div>
                       ))}
                       {(!editingInvoice.consolidatedItems || !editingInvoice.consolidatedItems.length) && (
@@ -886,12 +873,12 @@
 
                   <div className="flex gap-3">
                     <button onClick={()=>handleEditDecision('deductible')}
-                            className="flex-1 bg-green-500 text-white px-3 py-2 text-xs rounded-lg hover:bg-green-600 transition-colors inline-flex items-center justify-center gap-1">
-                      <Icon name="check" className="w-3 h-3" />可扣抵
+                            className="flex-1 bg-green-500 text-white px-3 py-2 text-xs rounded-lg hover:bg-green-600 transition-colors">
+                      可扣抵
                     </button>
                     <button onClick={()=>handleEditDecision('non-deductible')}
-                            className="flex-1 bg-red-500 text-white px-3 py-2 text-xs rounded-lg hover:bg-red-600 transition-colors inline-flex items-center justify-center gap-1">
-                      <Icon name="x" className="w-3 h-3" />不可扣抵
+                            className="flex-1 bg-red-500 text-white px-3 py-2 text-xs rounded-lg hover:bg-red-600 transition-colors">
+                      不可扣抵
                     </button>
                     <button onClick={closeEditModal}
                             className="flex-1 bg-gray-500 text-white px-3 py-2 text-xs rounded-lg hover:bg-gray-600 transition-colors">
