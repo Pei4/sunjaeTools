@@ -40,12 +40,6 @@
   <script type="text/babel" data-presets="env,react">
     const { useState, useEffect } = React;
 
-    // ---- Debug hooks ----
-    useEffect(()=>{ try{ console.debug('[state] invoiceDetailsData sample:', (invoiceDetailsData||[]).slice(0,5)); }catch(e){} }, [invoiceDetailsData]);
-    useEffect(()=>{ try{ console.debug('[state] invoiceData sample:', (invoiceData||[]).slice(0,5)); }catch(e){} }, [invoiceData]);
-    useEffect(()=>{ try{ console.debug('[state] pendingReviews size:', pendingReviews?.length, 'currentIndex:', currentReviewIndex); }catch(e){} }, [pendingReviews, currentReviewIndex]);
-    // ----------------------
-
 
     function ItemDetailsList({ items }) {
       try { console.debug('[ItemDetailsList] items size:', items?.length, 'sample:', (items||[]).slice(0,5)); } catch(e) {}
@@ -354,6 +348,7 @@
           });
           setInvoiceData(cleaned);
           setPendingReviews(cleaned);
+        try { console.debug('[initialDataCleaning] pendingReviews size after set:', (cleaned||[]).length); } catch(e) {}
           setStep(4);
           return;
         }
@@ -370,6 +365,7 @@
           });
           setInvoiceData(cleaned);
           setPendingReviews(cleaned);
+        try { console.debug('[initialDataCleaning] pendingReviews size after set:', (cleaned||[]).length); } catch(e) {}
           setStep(4);
         } else {
           const sorted = [...data].sort((a,b)=>{
@@ -434,6 +430,7 @@
               setInvoiceData(cleaned);
               const pending = cleaned.filter(i => i.buyerNote === '待查');
               setPendingReviews(pending);
+        try { console.debug('[initialDataCleaning] pendingReviews size after set:', (pending||[]).length); } catch(e) {}
               setStep(pending.length ? 4 : 5);
               return 100;
             }
@@ -485,9 +482,11 @@
         });
         setInvoiceData(reprocessed);
         const still = reprocessed.filter(i => i.buyerNote === '待查');
-        if (!still.length) { setPendingReviews([]); setStep(5); setCurrentReviewIndex(0); }
+        if (!still.length) { setPendingReviews([]);
+        try { console.debug('[initialDataCleaning] pendingReviews size after set:', ([]||[]).length); } catch(e) {} setStep(5); setCurrentReviewIndex(0); }
         else {
           setPendingReviews(still);
+        try { console.debug('[initialDataCleaning] pendingReviews size after set:', (still||[]).length); } catch(e) {}
           const idx = still.findIndex(i => i.invoiceNumber === currentNo);
           setStep(4);
           setCurrentReviewIndex(idx === -1 ? 0 : idx);
@@ -841,7 +840,8 @@
                             setStep(1); setUploadedFile(null);
                             setInvoiceData([]); setInvoiceDetailsData([]);
                             setOriginalInvoiceData([]); setOriginalDetailsData([]);
-                            setPendingReviews([]); setCurrentReviewIndex(0);
+                            setPendingReviews([]);
+        try { console.debug('[initialDataCleaning] pendingReviews size after set:', ([]||[]).length); } catch(e) {} setCurrentReviewIndex(0);
                             setError(''); setNewlyAddedRefData([]);
                             setInfo(''); setN8nAddStatus(null); setN8nGetStatus(null); setRefData([]); setFixedRefData([]);
                           }}
