@@ -40,11 +40,6 @@
   <script type="text/babel" data-presets="env,react">
     const { useState, useEffect } = React;
 
-    const $$formatAmount = (n) => {
-      const num = (typeof n === 'number') ? n : Number(n||0);
-      try { return num.toLocaleString(); } catch { return String(num); }
-    };
-
     function Icon({name, className="w-5 h-5"}) {
       const icons = {
         upload: <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="M5 20h14v-2H5v2Zm7-18l-5 5h3v6h4V7h3l-5-5Z"/></svg>,
@@ -195,6 +190,19 @@
         return res;
       };
 
+      // Consolidate item details with amount summation by name
+      const consolidateItemDetails = (details) => {
+        if (!Array.isArray(details) || !details.length) return [];
+        const map = new Map();
+        for (const d of details) {
+          const name = (d && d.name) ? String(d.name) : '';
+          if (!name) continue;
+          const amt = (typeof d.amount === 'number') ? d.amount : Number(d.amount||0);
+          map.set(name, (map.get(name)||0) + (isFinite(amt) ? amt : 0));
+        }
+        return Array.from(map.entries()).map(([name, amount]) => ({ name, amount }));
+      };
+
       const ensureXLSXReady = ()=>{
         if (!window.XLSX) {
           throw new Error('XLSX 函式庫尚未載入完成，請稍後再試或重新整理頁面');
@@ -316,7 +324,7 @@
               .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
               .map(d => d.itemName)
               .filter(Boolean);
-            return { ...inv, buyerNote:'待查', items:invItems, itemDetails: invItemDetails, consolidatedItems:consolidateItems(invItems) };
+            return { ...inv, buyerNote:'待查', items:invItems, consolidatedItems:consolidateItems(invItems), consolidatedItemDetails: consolidateItemDetails(invItemDetails) };
           });
           setInvoiceData(cleaned);
           setPendingReviews(cleaned);
@@ -331,7 +339,7 @@
               .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
               .map(d => d.itemName)
               .filter(Boolean);
-            return { ...inv, buyerNote:'待查', items:invItems, itemDetails: invItemDetails, consolidatedItems:consolidateItems(invItems) };
+            return { ...inv, buyerNote:'待查', items:invItems, consolidatedItems:consolidateItems(invItems), consolidatedItemDetails: consolidateItemDetails(invItemDetails) };
           });
           setInvoiceData(cleaned);
           setPendingReviews(cleaned);
@@ -363,7 +371,7 @@
                   .map(d => d.itemName)
                   .filter(Boolean);
                 if (!useRef || !useRef.length) {
-                  return { ...inv, buyerNote:'待查', items:invItems, itemDetails: invItemDetails, consolidatedItems:consolidateItems(invItems) };
+                  return { ...inv, buyerNote:'待查', items:invItems, consolidatedItems:consolidateItems(invItems), consolidatedItemDetails: consolidateItemDetails(invItemDetails) };
                 }
                 const yesRefs = useRef.filter(r => r.deductable === 'Yes');
                 const noRefs  = useRef.filter(r => r.deductable === 'No');
@@ -680,9 +688,10 @@
                       <div className="mb-3">
                         <label className="block text-xs font-medium text-gray-700 mb-2">發票商品明細</label>
                         <div className="space-y-2 overflow-y-auto bg-gray-50 rounded p-2" style={{height:'240px'}}>
-                          {pendingReviews[currentReviewIndex].consolidatedItems?.map((item, idx) => (
-                            <div key={idx} className="bg-white p-2 rounded shadow-sm">
-                              <span className="text-xs text-gray-800">{item}</span>
+                          {pendingReviews[currentReviewIndex].consolidatedItemDetails?.map((it, idx)=>(
+                            <div key={idx} className="bg-white p-2 rounded shadow-sm flex items-center justify-between">
+                              <span className="text-xs text-gray-800">{it.name}</span>
+                              <span className="text-xs text-gray-600">{Number(it.amount||0).toLocaleString()}</span>
                             </div>
                           ))}
                         </div>
@@ -837,7 +846,7 @@
                       {(editingInvoice.consolidatedItems||[]).map((it, i)=>(
                         <div key={i} className="bg-gray-50 p-2 rounded text-xs"><span className="text-gray-800">{it}</span></div>
                       ))}
-                      {(!editingInvoice.consolidatedItems || !editingInvoice.consolidatedItems.length) && (
+                      {(!editingInvoice.consolidatedItemDetails || !editingInvoice.consolidatedItemDetails.length) && (
                         <p className="text-xs text-gray-500">無商品資料</p>
                       )}
                     </div>
