@@ -106,7 +106,7 @@
       const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/get-ref-data';
       const headers = { 'X-API-Key': apiKey };
       try {
-        const res = await fetch(\`${endpoint}?key=${encodeURIComponent(apiKey)}\`, {
+        const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
           method: 'POST',
           headers: { ...headers, 'Content-Type': 'application/json' },
           body: JSON.stringify({ customerId }),
@@ -116,7 +116,8 @@
         if (normalized) return normalized;
       } catch(e){}
       try {
-        const res = await fetch(\`${endpoint}?key=${encodeURIComponent(apiKey)}&customerId=${encodeURIComponent(customerId)}\`, {
+        const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}&customerId=${encodeURIComponent(customerId)}`, {
+
           method: 'GET',
           headers,
         });
