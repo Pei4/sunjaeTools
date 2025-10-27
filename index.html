@@ -33,6 +33,14 @@
   <style>
     .work-container{width:100%}
     @media (min-width: 800px){.work-container{width:70%;margin:0 auto}}
+    
+    /* 覆寫自訂顏色 */
+    .bg-custom-yellow {
+      background-color: rgb(255, 221, 74);
+    }
+    .bg-custom-red {
+      background-color: rgb(254, 186, 242);
+    }
   </style>
 </head>
 <body class="bg-gray-50">
@@ -434,9 +442,6 @@
                 // 新增：計算每個明細的符合狀態
                 const itemStatuses = rawItems.map(item => checkItemMatch(item, inv.sellerId, useRef));
 
-                // 統計符合狀態
-                const totalItems = itemStatuses.length;
-                
                 // 將狀態合併回明細項目中
                 const itemsWithStatus = rawItems.map((item, index) => ({
                     ...item,
@@ -444,6 +449,7 @@
                 }));
 
                 // 統計數量
+                const totalItems = itemsWithStatus.length;
                 const matchYesItems = itemsWithStatus.filter(s => s.isYes && !s.isNo).length; // 僅符合可扣抵
                 const matchNoItems  = itemsWithStatus.filter(s => s.isNo).length;            // 符合不可扣抵 (不管是否同時符合可扣抵)
                 const noMatchItems  = itemsWithStatus.filter(s => !s.isYes && !s.isNo).length; // 皆不符合
@@ -787,9 +793,9 @@
 
                         let bgColorClass = 'bg-white';
                         if (hasNoMatch) {
-                            bgColorClass = 'bg-red-50'; // 有不可扣抵，顯示淺紅色
+                            bgColorClass = 'bg-custom-red'; // 替換為自訂淺紅色
                         } else if (hasNoRefMatch) {
-                            bgColorClass = 'bg-yellow-50'; // 皆不符合，顯示淺黃色
+                            bgColorClass = 'bg-custom-yellow'; // 替換為自訂淺黃色
                         } else {
                             bgColorClass = 'bg-white'; // 皆符合可扣抵，維持白色
                         }
@@ -868,7 +874,6 @@
                           <div className="space-y-1">
                             {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.map((item, i)=>{
                                 // 由於 Step 5 的顯示結果已經是最終的審核結果，這裡保持簡潔的灰色背景。
-                                // 如果需要將審核前狀態顏色帶入，則需要修改 Step 5 的樣式。
                                 return (
                                   <div key={i} className="bg-gray-50 px-2 py-1 rounded text-xs text-gray-800 flex justify-between items-center">
                                     <span>{item.name}{item.count>1?`（${item.count}項）`:''}</span>
@@ -971,9 +976,9 @@
 
                         let bgColorClass = 'bg-gray-50';
                         if (hasNoMatch) {
-                            bgColorClass = 'bg-red-50'; 
+                            bgColorClass = 'bg-custom-red'; // 替換為自訂淺紅色
                         } else if (hasNoRefMatch) {
-                            bgColorClass = 'bg-yellow-50';
+                            bgColorClass = 'bg-custom-yellow'; // 替換為自訂淺黃色
                         } else {
                             bgColorClass = 'bg-gray-50';
                         }
