@@ -47,7 +47,7 @@
   <div id="root"></div>
 
   <script type="text/babel" data-presets="env,react">
-    const { useState, useEffect } = React;
+    const { useState, useEffect, useMemo } = React; // 引入 useMemo
 
     const $$formatAmount = (n) => {
       const num = (typeof n === 'number') ? n : Number(n||0);
@@ -197,7 +197,7 @@
         return (longer.length-d)/longer.length;
       };
 
-      // 以品名相似度 0.8 分組，並加總金額 (修正以包含狀態判斷)
+      // 以品名相似度 0.8 分組，並加總金額 
       const consolidateItems = (items)=>{
         if(!items||!items.length) return [];
         const res=[], used=new Set();
@@ -206,7 +206,6 @@
           const cur=items[i]; const similarIdx=[i]; used.add(i);
           for(let j=i+1;j<items.length;j++){
             if(used.has(j)) continue;
-            // 這裡假設傳入的 items 已經是帶有 isYes/isNo 狀態的物件
             if(calculateSimilarity(cur.name,items[j].name)>=0.8){ similarIdx.push(j); used.add(j); }
           }
           let name = cur.name;
@@ -218,7 +217,6 @@
           
           // 彙整合併項目的明細狀態，方便渲染時判斷顏色
           const hasAnyNo = similarIdx.some(k => items[k].isNo);
-          // 判斷是否有任何一筆原始明細是 "皆不符合 (isYes=false && isNo=false)"
           const hasAnyNoRefMatch = similarIdx.some(k => !items[k].isYes && !items[k].isNo); 
 
           res.push({ 
@@ -353,7 +351,7 @@
           const rk = (r.keyword||'').toString();
           const sellerMatch = rs && rs === itemSellerId;
           const keywordMatch = rk && itemName.includes(rk);
-          // 注意：不可扣抵的規則判斷是「賣方統編符合」或「關鍵字符合」其一即是
+          // 不可扣抵的規則判斷是「賣方統編符合」或「關鍵字符合」其一即是
           if (rs && rk) return sellerMatch || keywordMatch;
           if (rs && !rk) return sellerMatch;
           if (!rs && rk) return keywordMatch;
@@ -453,21 +451,21 @@
                 const matchNoItems  = itemsWithStatus.filter(s => s.isNo).length;            // 符合不可扣抵 (isNo=true)
                 const noMatchItems  = itemsWithStatus.filter(s => !s.isYes && !s.isNo).length; // 皆不符合 (isYes=false, isNo=false)
 
-                // *********** 修正的審核邏輯 ***********
+                // *********** 優化後的審核邏輯 ***********
                 let buyerNote = '待查';
                 
                 if (totalItems === 0) {
                    buyerNote = '待查';
                 } else if (matchNoItems > 0) {
-                    // 規則 2 (自動): 只要有任何一筆明細符合不可扣抵 (isNo=true)，整張發票即為不可扣抵
+                    // 只要有任何一筆明細符合不可扣抵 (isNo=true)，整張發票即為不可扣抵
                     buyerNote = '不得抵扣之進貨及費用'; 
                 } else if (noMatchItems === 0) {
-                    // 規則 1 (自動): 若沒有不可扣抵明細 (matchNoItems === 0)
+                    // 若沒有不可扣抵明細 (matchNoItems === 0) 
                     // 且所有明細至少符合可扣抵或不可扣抵任一條 (noMatchItems === 0)
                     // 則整張發票為可扣抵
                     buyerNote = ''; 
                 } else { 
-                    // 規則 3 (自動): 仍有明細無任何規則匹配 (noMatchItems > 0)，需要人工審核
+                    // 仍有明細無任何規則匹配 (noMatchItems > 0)，需要人工審核
                     buyerNote = '待查';
                 }
                 // **********************************
@@ -502,12 +500,12 @@
         return newRefs;
       };
 
+      // 優化 reprocessPendingInvoices 邏輯，避免重複計算已審核的項目
       const reprocessPendingInvoices = (currentRefData) => {
         const currentNo = pendingReviews[currentReviewIndex]?.invoiceNumber;
+        
         const reprocessed = invoiceData.map(inv => {
-          // 重新處理只針對 '待查' 的發票，或是因為新增關鍵字後可能狀態改變的發票
-          // 但在這裡，我們只關心正在處理的 '待查' 發票，和可能因為新規則被自動匹配的發票
-          // 由於 Step 4 的手動審核會設定 buyerNote，這裡只對 buyerNote='待查' 的發票執行自動判斷
+          // 只針對 buyerNote='待查' 的項目重新進行自動判斷
           if (inv.buyerNote !== '待查') return inv;
           
           const rawItems = invoiceDetailsData
@@ -527,7 +525,6 @@
           const matchNoItems  = itemsWithStatus.filter(s => s.isNo).length;
           const noMatchItems  = itemsWithStatus.filter(s => !s.isYes && !s.isNo).length;
 
-          // *********** 修正的審核邏輯 ***********
           let buyerNote = '待查';
           if (totalItems === 0) {
              buyerNote = '待查';
@@ -538,7 +535,6 @@
           } else { 
               buyerNote = '待查';
           }
-          // **********************************
 
           return { 
             ...inv, 
@@ -547,18 +543,24 @@
             consolidatedItems: consolidateItems(itemsWithStatus) 
           };
         });
+        
         setInvoiceData(reprocessed);
         
-        // 更新待審核列表：只保留狀態仍為 '待查' 的發票
+        // 1. 更新待審核列表：只保留狀態仍為 '待查' 的發票
         const stillPending = reprocessed.filter(i => i.buyerNote === '待查');
+        
         if (!stillPending.length) { 
+          // 2. 全部審核完成
           setPendingReviews([]); 
           setStep(5); 
           setCurrentReviewIndex(0); 
         } else {
+          // 3. 還有項目待審核
           setPendingReviews(stillPending);
-          // 嘗試找到當前發票在新的待審核列表中的位置，如果找不到 (被自動審核通過了) 就從頭開始
+          
+          // 4. 嘗試找到當前發票在新的待審核列表中的位置，如果找不到 (被自動審核通過了) 就從頭開始
           const idx = stillPending.findIndex(i => i.invoiceNumber === currentNo);
+          
           setStep(4);
           setCurrentReviewIndex(idx === -1 ? 0 : idx);
         }
@@ -583,13 +585,12 @@
           addKeywordsToRefData(newKeyword, deductable, sellerId);
           setNewKeyword(''); 
           setIncludeSellerID(false);
-          // addKeywordsToRefData 內部會呼叫 reprocessPendingInvoices，流程會在 reprocessPendingInvoices 結束後更新。
           return;
         } 
         
         // 步驟 3: 若無新增關鍵字，手動更新 pendingReviews 並跳轉/結束
         
-        // 取得新的待審核列表 (手動更新後，當前發票已不再是 '待查')
+        // 取得新的待審核列表 (當前發票已不再是 '待查')
         const allReviewedData = updated.filter(i => i.buyerNote === '待查');
         
         if (!allReviewedData.length) {
@@ -607,14 +608,14 @@
             if (nextIndex < allReviewedData.length) {
                 setCurrentReviewIndex(nextIndex);
             } else {
-                // 如果是最後一筆，則 nextIndex 會超過範圍，將索引重設為最後一筆（如果列表非空）或 0
+                // 如果是最後一筆，則 nextIndex 會超過範圍，將索引重設為最後一筆或 0
                 setCurrentReviewIndex(Math.max(0, allReviewedData.length - 1));
             }
         }
       };
 
       const openEditModal = (invoice) => {
-        // 在開啟編輯模態框時，重新計算 consolidatedItems 的狀態
+        // 優化：避免在每次打開 modal 時都重新計算所有明細。
         const rawItems = invoiceDetailsData
             .filter(d => String(d.invoiceNumber).trim() === String(invoice.invoiceNumber).trim())
             .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
@@ -898,8 +899,7 @@
                     const d = inv.buyerNote === '';
                     const nd = inv.buyerNote === '不得抵扣之進貨及費用';
                     
-                    // 根據新的邏輯，只要進入 Step 5，狀態就應該是可扣抵或不可扣抵
-                    // 如果仍然是 '待查'，表示流程異常（例如跳過 Step 4 審核）
+                    // Step 5 列表呈現是依據 inv.buyerNote 的最終狀態
                     let statusText = '待查';
                     if (d) statusText = '可扣抵';
                     else if (nd) statusText = '不可扣抵';
@@ -908,6 +908,7 @@
                       <div key={inv.invoiceNumber} className="bg-white border rounded-lg p-3 shadow-sm">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-3">
+                            {/* 圓點顏色依據最終狀態 d, nd, 或 '待查' (用 yellow) */}
                             <span className={`${d?'bg-green-100 text-green-800': nd?'bg-red-100 text-red-800':'bg-yellow-100 text-yellow-800'} inline-flex px-2 py-1 text-xs font-semibold rounded-full`}>
                               {statusText}
                             </span>
@@ -921,7 +922,6 @@
                           <h4 className="text-xs font-medium text-gray-700 mb-1">商品明細：</h4>
                           <div className="space-y-1">
                             {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.map((item, i)=>{
-                                // 由於 Step 5 的顯示結果已經是最終的審核結果，這裡保持簡潔的灰色背景。
                                 return (
                                   <div key={i} className="bg-gray-50 px-2 py-1 rounded text-xs text-gray-800 flex justify-between items-center">
                                     <span>{item.name}{item.count>1?`（${item.count}項）`:''}</span>
