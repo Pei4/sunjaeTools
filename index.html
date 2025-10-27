@@ -50,8 +50,8 @@
       const s = String(v ?? '')
         .replace(/,/g, '')
         .replace(/\s+/g, '')
-        .replace(/[NT$\\xA0]/gi, '')
-        .replace(/[^0-9.\\-]/g, '');
+        .replace(/[NT$\xA0]/gi, '')  // 改用 \xA0 避免 \u escape 問題
+        .replace(/[^0-9.\-]/g, '');
       const n = Number(s || 0);
       return Number.isFinite(n) ? n : 0;
     };
@@ -117,7 +117,6 @@
       } catch(e){}
       try {
         const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}&customerId=${encodeURIComponent(customerId)}`, {
-
           method: 'GET',
           headers,
         });
@@ -133,13 +132,13 @@
       const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/add-ref-data';
       const headers = { 'X-API-Key': apiKey, 'Content-Type': 'application/json' };
       const payload = { customerId, rules };
-      const res = await fetch(\`${endpoint}?key=${encodeURIComponent(apiKey)}\`, {
+      const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),
         keepalive: true
       });
-      if (!res.ok) throw new Error(\`n8n 回應非 2xx（HTTP ${res.status}）\`);
+      if (!res.ok) throw new Error(`n8n 回應非 2xx（HTTP ${res.status}）`);
       return await res.json().catch(() => ({}));
     }
 
@@ -189,8 +188,7 @@
         const d=m[shorter.length][longer.length];
         return (longer.length-d)/longer.length;
       };
-
-      // 依相似度 0.8 分組並彙總金額；同時整合同組內的狀態：若含任何 no -> no；否則含任何 unknown -> unknown；否則 yes
+      // 以品名相似度 0.8 分組，並加總金額
       const consolidateItems = (items)=>{
         if(!items||!items.length) return [];
         const res=[], used=new Set();
@@ -205,10 +203,10 @@
           if (similarIdx.length>1){
             name = similarIdx.map(k=>items[k].name).reduce((x,y)=>x.length<y.length?x:y);
           }
+          // 額外增加一個 rawItemsIndex 陣列來記錄是原始明細的哪幾筆，方便後續對應
+          const rawItemsIndex = similarIdx.map(k => items[k].originalIndex);
           const sum = similarIdx.reduce((acc,k)=>acc + (Number(items[k].amount)||0), 0);
-          const groupStatuses = similarIdx.map(k=>items[k].status);
-          const status = groupStatuses.includes('no') ? 'no' : (groupStatuses.includes('unknown') ? 'unknown' : 'yes');
-          res.push({ name, count: similarIdx.length, amount: sum, status });
+          res.push({ name, count: similarIdx.length, amount: sum, rawItemsIndex });
         }
         return res;
       };
@@ -294,6 +292,7 @@
                 amount:        $$parseAmount(row[7]),
                 originalRow:   row,
                 rowIndex:      idx + 2,
+                originalIndex: idx, // 紀錄原始明細的索引
               })).filter(it => String(it.invoiceNumber||'').trim() && String(it.itemName||'').trim());
               resolve(processed);
             }
@@ -303,6 +302,45 @@
         reader.readAsArrayBuffer(file);
       });
 
+      // 檢查單筆明細是否符合任一參考規則
+      const checkItemMatch = (item, sellerId, refData) => {
+        const itemSellerId = String(sellerId).trim();
+        const itemName = String(item.name || item.itemName || '').trim();
+
+        const yesRefs = refData.filter(r => r.deductable === 'Yes');
+        const noRefs  = refData.filter(r => r.deductable === 'No');
+
+        let isYes = false;
+        let isNo = false;
+
+        // 檢查是否符合可扣抵
+        isYes = yesRefs.some(r => {
+          const rs = String(r.sellerId||'').trim();
+          const rk = (r.keyword||'').toString();
+          const sellerMatch = rs && rs === itemSellerId;
+          const keywordMatch = rk && itemName.includes(rk);
+          if (rs && rk) return sellerMatch && keywordMatch;
+          if (rs && !rk) return sellerMatch;
+          if (!rs && rk) return keywordMatch;
+          return false;
+        });
+
+        // 檢查是否符合不可扣抵
+        isNo = noRefs.some(r => {
+          const rs = String(r.sellerId||'').trim();
+          const rk = (r.keyword||'').toString();
+          const sellerMatch = rs && rs === itemSellerId;
+          const keywordMatch = rk && itemName.includes(rk);
+          // 注意：不可扣抵的規則判斷是「賣方統編符合」或「關鍵字符合」其一即是
+          if (rs && rk) return sellerMatch || keywordMatch;
+          if (rs && !rk) return sellerMatch;
+          if (!rs && rk) return keywordMatch;
+          return false;
+        });
+
+        return { isYes, isNo };
+      };
+      
       const searchRefData = async (customerIdParam, invoicesArg, detailsArg) => {
         const cid = customerIdParam || companyId;
         setStep(2);
@@ -331,7 +369,7 @@
           const cleaned = invoices.map(inv => {
             const rawItems = details
               .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
-              .map(d => ({ name: d.itemName, amount: d.amount, status: 'unknown' }))
+              .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
               .filter(it => it.name);
             return { ...inv, buyerNote:'待查', items:rawItems, consolidatedItems:consolidateItems(rawItems) };
           });
@@ -346,7 +384,7 @@
           const cleaned = invoices.map(inv => {
             const rawItems = details
               .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
-              .map(d => ({ name: d.itemName, amount: d.amount, status: 'unknown' }))
+              .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
               .filter(it => it.name);
             return { ...inv, buyerNote:'待查', items:rawItems, consolidatedItems:consolidateItems(rawItems) };
           });
@@ -364,33 +402,6 @@
         }
       };
 
-      // === 依規則比對單一明細，回傳 'yes' | 'no' | 'unknown' ===
-      const classifyItem = (itemName, invSellerId, useRef) => {
-        if (!useRef || !useRef.length) return 'unknown';
-        const yesRefs = useRef.filter(r => r.deductable === 'Yes');
-        const noRefs  = useRef.filter(r => r.deductable === 'No');
-        const sellerId = String(invSellerId||'').trim();
-        const nm = (itemName||'').toString();
-
-        const matches = (r) => {
-          const rs = String(r.sellerId||'').trim();
-          const rk = (r.keyword||'').toString();
-          const sellerMatch = rs && rs === sellerId;
-          const keywordMatch = rk && nm.includes(rk);
-          if (rs && rk) return sellerMatch && keywordMatch;
-          if (rs && !rk) return sellerMatch;
-          if (!rs && rk) return keywordMatch;
-          return false;
-        };
-
-        const isNo  = noRefs.some(matches);
-        const isYes = yesRefs.some(matches);
-        if (isNo && !isYes) return 'no';
-        if (isYes && !isNo) return 'yes';
-        // 同時命中或皆未命中 -> unknown，交人工
-        return 'unknown';
-      };
-
       const startCleaningWithRef = () => { initialDataCleaning(refData); };
 
       const initialDataCleaning = (useRef) => {
@@ -401,34 +412,49 @@
             if (prev >= 100) {
               clearInterval(interval);
               const cleaned = invoiceData.map(inv => {
-                const invSellerId = String(inv.sellerId).trim();
-                // 原始明細（含狀態）
                 const rawItems = invoiceDetailsData
                   .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
-                  .map(d => {
-                    const status = classifyItem(d.itemName, invSellerId, useRef);
-                    return { name: d.itemName, amount: d.amount, status };
-                  })
+                  .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
                   .filter(it => it.name);
+                
+                // 新增：計算每個明細的符合狀態
+                const itemStatuses = rawItems.map(item => checkItemMatch(item, inv.sellerId, useRef));
 
-                // 依新規則決定整張發票狀態
+                // 統計符合狀態
+                const totalItems = itemStatuses.length;
+                const matchYesItems = itemStatuses.filter(s => s.isYes && !s.isNo).length; // 僅符合可扣抵
+                const matchNoItems  = itemStatuses.filter(s => s.isNo).length;            // 符合不可扣抵 (不管是否同時符合可扣抵)
+                const noMatchItems  = itemStatuses.filter(s => !s.isYes && !s.isNo).length; // 皆不符合
+
                 let buyerNote = '待查';
-                if (rawItems.length > 0) {
-                  const statuses = rawItems.map(it => it.status);
-                  const allYes = statuses.every(s => s === 'yes');
-                  const allNo  = statuses.every(s => s === 'no');
-                  if (allYes) buyerNote = '';
-                  else if (allNo) buyerNote = '不得抵扣之進貨及費用';
-                  else buyerNote = '待查';
+                
+                if (totalItems === 0) { // 無明細資料
+                   buyerNote = '待查';
+                } else if (matchYesItems === totalItems) { // 所有明細皆僅符合可扣抵
+                    buyerNote = ''; // 可扣抵
+                } else if (matchNoItems === totalItems) { // 所有明細皆符合不可扣抵
+                    buyerNote = '不得抵扣之進貨及費用'; // 不可扣抵
+                } else { 
+                    // 有任何一項明細不符合任何條件 (noMatchItems > 0)
+                    // 或同時有符合可扣抵 (matchYesItems > 0) 和符合不可扣抵 (matchNoItems > 0) 的項目
+                    // 則進入待查
+                    buyerNote = '待查';
                 }
 
-                return {
-                  ...inv,
-                  buyerNote,
-                  items: rawItems,
-                  consolidatedItems: consolidateItems(rawItems)
+                // 將明細狀態帶入發票物件中
+                const itemsWithStatus = rawItems.map((item, index) => ({
+                    ...item,
+                    ...itemStatuses[index],
+                }));
+
+                return { 
+                  ...inv, 
+                  buyerNote, 
+                  items: itemsWithStatus, 
+                  consolidatedItems: consolidateItems(itemsWithStatus) 
                 };
               });
+
               setInvoiceData(cleaned);
               const pending = cleaned.filter(i => i.buyerNote === '待查');
               setPendingReviews(pending);
@@ -455,28 +481,39 @@
         const currentNo = pendingReviews[currentReviewIndex]?.invoiceNumber;
         const reprocessed = invoiceData.map(inv => {
           if (inv.buyerNote !== '待查') return inv;
-          const invSellerId = String(inv.sellerId).trim();
+          
+          const rawItems = invoiceDetailsData
+            .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
+            .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
+            .filter(it => it.name);
 
-          const rawItems = (inv.items && inv.items.length) ? inv.items.map(it => ({
-            ...it,
-            status: classifyItem(it.name, invSellerId, currentRefData)
-          })) : [];
+          const itemStatuses = rawItems.map(item => checkItemMatch(item, inv.sellerId, currentRefData));
+
+          const totalItems = itemStatuses.length;
+          const matchYesItems = itemStatuses.filter(s => s.isYes && !s.isNo).length;
+          const matchNoItems  = itemStatuses.filter(s => s.isNo).length;
 
           let buyerNote = '待查';
-          if (rawItems.length > 0) {
-            const statuses = rawItems.map(it => it.status);
-            const allYes = statuses.every(s => s === 'yes');
-            const allNo  = statuses.every(s => s === 'no');
-            if (allYes) buyerNote = '';
-            else if (allNo) buyerNote = '不得抵扣之進貨及費用';
-            else buyerNote = '待查';
+          if (totalItems === 0) {
+             buyerNote = '待查';
+          } else if (matchYesItems === totalItems) {
+              buyerNote = '';
+          } else if (matchNoItems === totalItems) {
+              buyerNote = '不得抵扣之進貨及費用';
+          } else { 
+              buyerNote = '待查';
           }
+
+          const itemsWithStatus = rawItems.map((item, index) => ({
+              ...item,
+              ...itemStatuses[index],
+          }));
 
           return { 
             ...inv, 
-            buyerNote,
-            items: rawItems,
-            consolidatedItems: consolidateItems(rawItems)
+            buyerNote, 
+            items: itemsWithStatus, 
+            consolidatedItems: consolidateItems(itemsWithStatus) 
           };
         });
         setInvoiceData(reprocessed);
@@ -504,19 +541,37 @@
           const deductable = decision === 'deductible' ? 'Yes' : 'No';
           addKeywordsToRefData(newKeyword, deductable, sellerId);
           setNewKeyword(''); setIncludeSellerID(false);
-          return;
+          // reprocessPendingInvoices 會在 addKeywordsToRefData 內執行，所以不需要再跳轉
+        } else {
+            // 如果沒有新增關鍵字，就單純跳到下一筆
+            const nextIndex = currentReviewIndex + 1;
+            const stillPending = updated.filter(i => i.buyerNote === '待查');
+            if (nextIndex < stillPending.length) setCurrentReviewIndex(nextIndex);
+            else setStep(5);
         }
-        if (currentReviewIndex < pendingReviews.length - 1) setCurrentReviewIndex(i => i + 1);
-        else setStep(5);
       };
 
       const openEditModal = (invoice) => {
-        setEditingInvoice(invoice);
+        // 在開啟編輯模態框時，需要重新計算 consolidatedItems 的狀態
+        const rawItems = invoiceDetailsData
+            .filter(d => String(d.invoiceNumber).trim() === String(invoice.invoiceNumber).trim())
+            .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
+            .filter(it => it.name);
+        const itemsWithStatus = rawItems.map(item => checkItemMatch(item, invoice.sellerId, refData));
+        const consolidatedItemsWithStatus = consolidateItems(itemsWithStatus.map((s, i) => ({ ...rawItems[i], ...s })));
+        
+        setEditingInvoice({
+            ...invoice,
+            items: itemsWithStatus.map((s, i) => ({ ...rawItems[i], ...s })),
+            consolidatedItems: consolidatedItemsWithStatus
+        });
         setNewKeyword('');
         setEditIncludeSellerID(false);
         setShowEditModal(true);
       };
+
       const closeEditModal = () => { setShowEditModal(false); setEditingInvoice(null); setNewKeyword(''); setEditIncludeSellerID(false); };
+      
       const handleEditDecision = (decision) => {
         if (!editingInvoice) return;
         const updated = invoiceData.map(inv =>
@@ -581,7 +636,7 @@
           window.XLSX.utils.book_append_sheet(wb, ws2, "Invoice_details");
 
           const dateStr = new Date().toISOString().slice(0,10);
-          window.XLSX.writeFile(wb, \`${companyId}_處理結果_${dateStr}.xlsx\`);
+          window.XLSX.writeFile(wb, `${companyId}_處理結果_${dateStr}.xlsx`);
         } catch (e) {
           alert('下載失敗：' + (e?.message || String(e)));
         }
@@ -642,7 +697,7 @@
                           {refData.map((ref, idx) => (
                             <tr key={idx} className="border-b border-gray-200">
                               <td className="py-2 px-2 text-center">
-                                <span className={\`${ref.deductable==='Yes'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'} inline-flex px-2 py-1 text-xs font-medium rounded-full\`}>
+                                <span className={`${ref.deductable==='Yes'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'} inline-flex px-2 py-1 text-xs font-medium rounded-full`}>
                                   {ref.deductable==='Yes'?'可扣抵':'不可扣抵'}
                                 </span>
                               </td>
@@ -679,82 +734,98 @@
               </div>
             )}
 
-            {step===4 && (
-              <div className="flex-1 overflow-y-auto">
-                {pendingReviews.length===0 ? (
-                  <div className="text-center">
-                    <h2 className="text-lg font-bold mb-3">無待審核項目</h2>
-                    <button onClick={()=>setStep(5)} className="bg-blue-500 text-white px-4 py-2 text-sm rounded-lg">查看結果</button>
-                  </div>
-                ) : (
-                  <div className="h-full flex flex-col">
-                    <div className="h-8 flex justify-between items-center flex-shrink-0">
-                      <h2 className="text-lg font-bold">逐筆審核待查項目</h2>
-                      <p className="text-sm text-gray-600">進度：{currentReviewIndex+1} / {pendingReviews.length}</p>
+            {step===4 && pendingReviews.length>0 && (
+              <div className="h-full flex flex-col">
+                <div className="h-8 flex justify-between items-center flex-shrink-0">
+                  <h2 className="text-lg font-bold">逐筆審核待查項目</h2>
+                  <p className="text-sm text-gray-600">進度：{currentReviewIndex+1} / {pendingReviews.length}</p>
+                </div>
+
+                <div className="bg-white border rounded-lg p-4 flex-shrink-0" style={{height:'420px'}}>
+                  <div className="grid grid-cols-2 gap-4 mb-3 h-12">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">發票號碼</label>
+                      <p className="text-sm font-semibold">{pendingReviews[currentReviewIndex].invoiceNumber}</p>
                     </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">賣方資訊</label>
+                      <p className="text-sm font-semibold truncate" title={`${pendingReviews[currentReviewIndex].sellerId} ${pendingReviews[currentReviewIndex].sellerName}`}>
+                        {pendingReviews[currentReviewIndex].sellerId} {pendingReviews[currentReviewIndex].sellerName}
+                      </p>
+                    </div>
+                  </div>
 
-                    <div className="bg-white border rounded-lg p-4 flex-shrink-0" style={{height:'420px'}}>
-                      <div className="grid grid-cols-2 gap-4 mb-3 h-12">
-                        <div>
-                          <label className="block text-xs font-medium text-gray-700 mb-1">發票號碼</label>
-                          <p className="text-sm font-semibold">{pendingReviews[currentReviewIndex].invoiceNumber}</p>
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-gray-700 mb-1">賣方資訊</label>
-                          <p className="text-sm font-semibold truncate" title={\`${pendingReviews[currentReviewIndex].sellerId} ${pendingReviews[currentReviewIndex].sellerName}\`}>
-                            {pendingReviews[currentReviewIndex].sellerId} {pendingReviews[currentReviewIndex].sellerName}
-                          </p>
-                        </div>
-                      </div>
+                  <div className="mb-3">
+                    <label className="block text-xs font-medium text-gray-700 mb-2">發票商品明細</label>
+                    <div className="space-y-2 overflow-y-auto bg-gray-50 rounded p-2" style={{height:'240px'}}>
+                      {/* 明細項目顯示邏輯：使用 consolidatedItems，並根據該項目包含的 rawItems 判斷顏色 */}
+                      {pendingReviews[currentReviewIndex].consolidatedItems?.map((item, idx) => {
+                        // 判斷該合併項目包含的原始明細中，是否有符合 "isNo" 或 "皆不符合"
+                        // 這裡需要透過 rawItemsIndex 陣列回溯到原始 itemsWithStatus
+                        const originalItems = item.rawItemsIndex.map(
+                            originalIndex => pendingReviews[currentReviewIndex].items.find(i => i.originalIndex === originalIndex)
+                        ).filter(Boolean);
 
-                      <div className="mb-3">
-                        <label className="block text-xs font-medium text-gray-700 mb-2">發票商品明細</label>
-                        <div className="space-y-2 overflow-y-auto bg-gray-50 rounded p-2" style={{height:'240px'}}>
-                          {pendingReviews[currentReviewIndex].consolidatedItems?.map((item, idx) => {
-                            let cls = "bg-white p-2 rounded shadow-sm flex justify-between items-center";
-                            if (item.status === 'no') cls = "bg-red-50 text-red-800 p-2 rounded shadow-sm flex justify-between items-center";
-                            else if (item.status === 'unknown') cls = "bg-yellow-50 text-yellow-800 p-2 rounded shadow-sm flex justify-between items-center";
-                            return (
-                              <div key={idx} className={cls}>
-                                <span className="text-xs">
-                                  {item.name}{item.count>1?`（${item.count}項）`:''}
-                                </span>
-                                <span className="text-xs font-semibold">{$$formatAmount(item.amount)}元</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <p className="text-[10px] text-gray-500 mt-1">紅底：符合不可扣抵；黃底：未命中任何可/不可扣抵規則（需人工判定）。</p>
-                      </div>
+                        // 檢查是否有任一原始明細符合不可扣抵
+                        const hasNoMatch = originalItems.some(i => i.isNo);
+                        // 檢查是否有任一原始明細符合「皆不符合」
+                        const hasNoRefMatch = originalItems.some(i => !i.isYes && !i.isNo);
 
-                      <div className="mb-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <label className="block text-xs font-medium text-gray-700">新增關鍵字（選填）</label>
-                          <div className="flex items-center gap-2">
-                            <input type="checkbox" id="include-seller-id" checked={includeSellerID} onChange={e=>setIncludeSellerID(e.target.checked)} className="w-3 h-3"/>
-                            <label htmlFor="include-seller-id" className="text-xs text-gray-700">加入賣方統編判斷</label>
+                        let bgColorClass = 'bg-white';
+                        if (hasNoMatch) {
+                            bgColorClass = 'bg-red-50'; // 有不可扣抵，顯示淺紅色
+                        } else if (hasNoRefMatch) {
+                            bgColorClass = 'bg-yellow-50'; // 皆不符合，顯示淺黃色
+                        } else {
+                            bgColorClass = 'bg-white'; // 皆符合可扣抵，維持白色
+                        }
+                        
+                        return (
+                          <div key={idx} className={`${bgColorClass} p-2 rounded shadow-sm flex justify-between items-center`}>
+                            <span className="text-xs text-gray-800">
+                              {item.name}{item.count>1?`（${item.count}項）`:''}
+                            </span>
+                            <span className="text-xs text-gray-900 font-semibold">{$$formatAmount(item.amount)}元</span>
                           </div>
-                        </div>
-                        <input type="text" value={newKeyword} onChange={e=>setNewKeyword(e.target.value)}
-                          placeholder="輸入新的可扣抵 / 不可扣抵商品關鍵字，多個請用逗號分隔"
-                          className="w-full p-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"/>
-                      </div>
-                    </div>
-
-                    <div className="h-12 flex gap-3 items-center flex-shrink-0">
-                      <button onClick={()=>handleReviewDecision('deductible')}
-                              className="flex-1 bg-green-500 text-white px-4 py-2 text-xs rounded-lg hover:bg-green-600 transition-colors">
-                        可扣抵
-                      </button>
-                      <button onClick={()=>handleReviewDecision('non-deductible')}
-                              className="flex-1 bg-red-500 text-white px-4 py-2 text-xs rounded-lg hover:bg-red-600 transition-colors">
-                        不可扣抵
-                      </button>
+                        );
+                      })}
                     </div>
                   </div>
-                )}
+
+                  <div className="mb-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-xs font-medium text-gray-700">新增關鍵字（選填）</label>
+                      <div className="flex items-center gap-2">
+                        <input type="checkbox" id="include-seller-id" checked={includeSellerID} onChange={e=>setIncludeSellerID(e.target.checked)} className="w-3 h-3"/>
+                        <label htmlFor="include-seller-id" className="text-xs text-gray-700">加入賣方統編判斷</label>
+                      </div>
+                    </div>
+                    <input type="text" value={newKeyword} onChange={e=>setNewKeyword(e.target.value)}
+                      placeholder="輸入新的可扣抵 / 不可扣抵商品關鍵字，多個請用逗號分隔"
+                      className="w-full p-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"/>
+                  </div>
+                </div>
+
+                <div className="h-12 flex gap-3 items-center flex-shrink-0">
+                  <button onClick={()=>handleReviewDecision('deductible')}
+                          className="flex-1 bg-green-500 text-white px-4 py-2 text-xs rounded-lg hover:bg-green-600 transition-colors">
+                    可扣抵
+                  </button>
+                  <button onClick={()=>handleReviewDecision('non-deductible')}
+                          className="flex-1 bg-red-500 text-white px-4 py-2 text-xs rounded-lg hover:bg-red-600 transition-colors">
+                    不可扣抵
+                  </button>
+                </div>
               </div>
             )}
+            
+            {step===4 && pendingReviews.length===0 && (
+                <div className="text-center">
+                    <h2 className="text-lg font-bold mb-3">無待審核項目</h2>
+                    <button onClick={()=>setStep(5)} className="bg-blue-500 text-white px-4 py-2 text-sm rounded-lg">查看結果</button>
+                </div>
+            )}
+
 
             {step===5 && (
               <div className="flex-1 overflow-y-auto">
@@ -782,15 +853,13 @@
                           <h4 className="text-xs font-medium text-gray-700 mb-1">商品明細：</h4>
                           <div className="space-y-1">
                             {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.map((item, i)=>{
-                              let cls = "bg-gray-50 px-2 py-1 rounded text-xs flex justify-between items-center";
-                              if (item.status === 'no') cls = "bg-red-50 text-red-800 px-2 py-1 rounded text-xs flex justify-between items-center";
-                              else if (item.status === 'unknown') cls = "bg-yellow-50 text-yellow-800 px-2 py-1 rounded text-xs flex justify-between items-center";
-                              return (
-                                <div key={i} className={cls}>
-                                  <span>{item.name}{item.count>1?`（${item.count}項）`:''}</span>
-                                  <span className="font-semibold">{$$formatAmount(item.amount)}元</span>
-                                </div>
-                              );
+                                // 判斷顏色：由於這裡已經是最終結果，不依賴 refData，所以維持原樣或簡化
+                                return (
+                                  <div key={i} className="bg-gray-50 px-2 py-1 rounded text-xs text-gray-800 flex justify-between items-center">
+                                    <span>{item.name}{item.count>1?`（${item.count}項）`:''}</span>
+                                    <span className="font-semibold">{$$formatAmount(item.amount)}元</span>
+                                  </div>
+                                );
                             }) : (
                               <div className="text-gray-400 italic text-xs">無商品資料</div>
                             )}
@@ -880,14 +949,28 @@
                   <div className="mb-4">
                     <label className="block text-xs font-medium text-gray-700 mb-2">商品明細</label>
                     <div className="space-y-1 max-h-32 overflow-y-auto">
-                      {(editingInvoice.consolidatedItems||[]).map((it, i)=>{
-                        let cls = "bg-gray-50 p-2 rounded text-xs flex justify-between items-center";
-                        if (it.status === 'no') cls = "bg-red-50 text-red-800 p-2 rounded text-xs flex justify-between items-center";
-                        else if (it.status === 'unknown') cls = "bg-yellow-50 text-yellow-800 p-2 rounded text-xs flex justify-between items-center";
+                      {(editingInvoice.consolidatedItems||[]).map((item, i)=>{
+                        // 同 Step 4 邏輯，判斷顏色
+                        const originalItems = item.rawItemsIndex.map(
+                            originalIndex => editingInvoice.items.find(i => i.originalIndex === originalIndex)
+                        ).filter(Boolean);
+
+                        const hasNoMatch = originalItems.some(i => i.isNo);
+                        const hasNoRefMatch = originalItems.some(i => !i.isYes && !i.isNo);
+
+                        let bgColorClass = 'bg-gray-50';
+                        if (hasNoMatch) {
+                            bgColorClass = 'bg-red-50'; 
+                        } else if (hasNoRefMatch) {
+                            bgColorClass = 'bg-yellow-50';
+                        } else {
+                            bgColorClass = 'bg-gray-50';
+                        }
+                        
                         return (
-                          <div key={i} className={cls}>
-                            <span className="">{it.name}{it.count>1?`（${it.count}項）`:''}</span>
-                            <span className="font-semibold">{$$formatAmount(it.amount)}元</span>
+                          <div key={i} className={`${bgColorClass} p-2 rounded text-xs flex justify-between items-center`}>
+                            <span className="text-gray-800">{item.name}{item.count>1?`（${item.count}項）`:''}</span>
+                            <span className="font-semibold">{$$formatAmount(item.amount)}元</span>
                           </div>
                         );
                       })}
