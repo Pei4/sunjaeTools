@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>發票審核系統</title>
-  <link rel="shortcut icon" href="favicon.ico">
+  <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico">
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -188,7 +188,8 @@
         const d=m[shorter.length][longer.length];
         return (longer.length-d)/longer.length;
       };
-      // 以品名相似度 0.8 分組，並加總金額
+
+      // 以品名相似度 0.8 分組，並加總金額 (修正以包含狀態判斷)
       const consolidateItems = (items)=>{
         if(!items||!items.length) return [];
         const res=[], used=new Set();
@@ -197,16 +198,29 @@
           const cur=items[i]; const similarIdx=[i]; used.add(i);
           for(let j=i+1;j<items.length;j++){
             if(used.has(j)) continue;
+            // 這裡假設傳入的 items 已經是帶有 isYes/isNo 狀態的物件
             if(calculateSimilarity(cur.name,items[j].name)>=0.8){ similarIdx.push(j); used.add(j); }
           }
           let name = cur.name;
           if (similarIdx.length>1){
             name = similarIdx.map(k=>items[k].name).reduce((x,y)=>x.length<y.length?x:y);
           }
-          // 額外增加一個 rawItemsIndex 陣列來記錄是原始明細的哪幾筆，方便後續對應
           const rawItemsIndex = similarIdx.map(k => items[k].originalIndex);
           const sum = similarIdx.reduce((acc,k)=>acc + (Number(items[k].amount)||0), 0);
-          res.push({ name, count: similarIdx.length, amount: sum, rawItemsIndex });
+          
+          // 彙整合併項目的明細狀態，方便渲染時判斷顏色
+          const hasAnyNo = similarIdx.some(k => items[k].isNo);
+          // 判斷是否有任何一筆原始明細是 "皆不符合 (isYes=false && isNo=false)"
+          const hasAnyNoRefMatch = similarIdx.some(k => !items[k].isYes && !items[k].isNo); 
+
+          res.push({ 
+            name, 
+            count: similarIdx.length, 
+            amount: sum, 
+            rawItemsIndex,
+            consolidatedIsNo: hasAnyNo, 
+            consolidatedIsNoRefMatch: hasAnyNoRefMatch,
+          });
         }
         return res;
       };
@@ -422,9 +436,17 @@
 
                 // 統計符合狀態
                 const totalItems = itemStatuses.length;
-                const matchYesItems = itemStatuses.filter(s => s.isYes && !s.isNo).length; // 僅符合可扣抵
-                const matchNoItems  = itemStatuses.filter(s => s.isNo).length;            // 符合不可扣抵 (不管是否同時符合可扣抵)
-                const noMatchItems  = itemStatuses.filter(s => !s.isYes && !s.isNo).length; // 皆不符合
+                
+                // 將狀態合併回明細項目中
+                const itemsWithStatus = rawItems.map((item, index) => ({
+                    ...item,
+                    ...itemStatuses[index],
+                }));
+
+                // 統計數量
+                const matchYesItems = itemsWithStatus.filter(s => s.isYes && !s.isNo).length; // 僅符合可扣抵
+                const matchNoItems  = itemsWithStatus.filter(s => s.isNo).length;            // 符合不可扣抵 (不管是否同時符合可扣抵)
+                const noMatchItems  = itemsWithStatus.filter(s => !s.isYes && !s.isNo).length; // 皆不符合
 
                 let buyerNote = '待查';
                 
@@ -432,20 +454,14 @@
                    buyerNote = '待查';
                 } else if (matchYesItems === totalItems) { // 所有明細皆僅符合可扣抵
                     buyerNote = ''; // 可扣抵
-                } else if (matchNoItems === totalItems) { // 所有明細皆符合不可扣抵
+                } else if (matchNoItems === totalItems && noMatchItems === 0) { // 所有明細皆符合不可扣抵，且沒有皆不符合的項目
                     buyerNote = '不得抵扣之進貨及費用'; // 不可扣抵
                 } else { 
                     // 有任何一項明細不符合任何條件 (noMatchItems > 0)
-                    // 或同時有符合可扣抵 (matchYesItems > 0) 和符合不可扣抵 (matchNoItems > 0) 的項目
+                    // 或同時有符合僅可扣抵 (matchYesItems > 0) 和符合不可扣抵 (matchNoItems > 0) 的項目
                     // 則進入待查
                     buyerNote = '待查';
                 }
-
-                // 將明細狀態帶入發票物件中
-                const itemsWithStatus = rawItems.map((item, index) => ({
-                    ...item,
-                    ...itemStatuses[index],
-                }));
 
                 return { 
                   ...inv, 
@@ -490,24 +506,26 @@
           const itemStatuses = rawItems.map(item => checkItemMatch(item, inv.sellerId, currentRefData));
 
           const totalItems = itemStatuses.length;
-          const matchYesItems = itemStatuses.filter(s => s.isYes && !s.isNo).length;
-          const matchNoItems  = itemStatuses.filter(s => s.isNo).length;
+          
+          const itemsWithStatus = rawItems.map((item, index) => ({
+              ...item,
+              ...itemStatuses[index],
+          }));
+
+          const matchYesItems = itemsWithStatus.filter(s => s.isYes && !s.isNo).length;
+          const matchNoItems  = itemsWithStatus.filter(s => s.isNo).length;
+          const noMatchItems  = itemsWithStatus.filter(s => !s.isYes && !s.isNo).length;
 
           let buyerNote = '待查';
           if (totalItems === 0) {
              buyerNote = '待查';
           } else if (matchYesItems === totalItems) {
               buyerNote = '';
-          } else if (matchNoItems === totalItems) {
+          } else if (matchNoItems === totalItems && noMatchItems === 0) {
               buyerNote = '不得抵扣之進貨及費用';
           } else { 
               buyerNote = '待查';
           }
-
-          const itemsWithStatus = rawItems.map((item, index) => ({
-              ...item,
-              ...itemStatuses[index],
-          }));
 
           return { 
             ...inv, 
@@ -545,6 +563,8 @@
         } else {
             // 如果沒有新增關鍵字，就單純跳到下一筆
             const nextIndex = currentReviewIndex + 1;
+            // 由於 setInvoiceData 已經更新，pendingReviews 的內容可能已經改變
+            // 這裡需要以更新後的 invoiceData 來篩選 next item
             const stillPending = updated.filter(i => i.buyerNote === '待查');
             if (nextIndex < stillPending.length) setCurrentReviewIndex(nextIndex);
             else setStep(5);
@@ -552,17 +572,18 @@
       };
 
       const openEditModal = (invoice) => {
-        // 在開啟編輯模態框時，需要重新計算 consolidatedItems 的狀態
+        // 在開啟編輯模態框時，重新計算 consolidatedItems 的狀態
         const rawItems = invoiceDetailsData
             .filter(d => String(d.invoiceNumber).trim() === String(invoice.invoiceNumber).trim())
             .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
             .filter(it => it.name);
-        const itemsWithStatus = rawItems.map(item => checkItemMatch(item, invoice.sellerId, refData));
-        const consolidatedItemsWithStatus = consolidateItems(itemsWithStatus.map((s, i) => ({ ...rawItems[i], ...s })));
+            
+        const itemsWithStatus = rawItems.map(item => ({...item, ...checkItemMatch(item, invoice.sellerId, refData)}));
+        const consolidatedItemsWithStatus = consolidateItems(itemsWithStatus);
         
         setEditingInvoice({
             ...invoice,
-            items: itemsWithStatus.map((s, i) => ({ ...rawItems[i], ...s })),
+            items: itemsWithStatus,
             consolidatedItems: consolidatedItemsWithStatus
         });
         setNewKeyword('');
@@ -760,16 +781,9 @@
                     <div className="space-y-2 overflow-y-auto bg-gray-50 rounded p-2" style={{height:'240px'}}>
                       {/* 明細項目顯示邏輯：使用 consolidatedItems，並根據該項目包含的 rawItems 判斷顏色 */}
                       {pendingReviews[currentReviewIndex].consolidatedItems?.map((item, idx) => {
-                        // 判斷該合併項目包含的原始明細中，是否有符合 "isNo" 或 "皆不符合"
-                        // 這裡需要透過 rawItemsIndex 陣列回溯到原始 itemsWithStatus
-                        const originalItems = item.rawItemsIndex.map(
-                            originalIndex => pendingReviews[currentReviewIndex].items.find(i => i.originalIndex === originalIndex)
-                        ).filter(Boolean);
-
-                        // 檢查是否有任一原始明細符合不可扣抵
-                        const hasNoMatch = originalItems.some(i => i.isNo);
-                        // 檢查是否有任一原始明細符合「皆不符合」
-                        const hasNoRefMatch = originalItems.some(i => !i.isYes && !i.isNo);
+                        // 使用合併後的狀態來判斷顏色
+                        const hasNoMatch = item.consolidatedIsNo;
+                        const hasNoRefMatch = item.consolidatedIsNoRefMatch;
 
                         let bgColorClass = 'bg-white';
                         if (hasNoMatch) {
@@ -853,7 +867,8 @@
                           <h4 className="text-xs font-medium text-gray-700 mb-1">商品明細：</h4>
                           <div className="space-y-1">
                             {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.map((item, i)=>{
-                                // 判斷顏色：由於這裡已經是最終結果，不依賴 refData，所以維持原樣或簡化
+                                // 由於 Step 5 的顯示結果已經是最終的審核結果，這裡保持簡潔的灰色背景。
+                                // 如果需要將審核前狀態顏色帶入，則需要修改 Step 5 的樣式。
                                 return (
                                   <div key={i} className="bg-gray-50 px-2 py-1 rounded text-xs text-gray-800 flex justify-between items-center">
                                     <span>{item.name}{item.count>1?`（${item.count}項）`:''}</span>
@@ -950,13 +965,9 @@
                     <label className="block text-xs font-medium text-gray-700 mb-2">商品明細</label>
                     <div className="space-y-1 max-h-32 overflow-y-auto">
                       {(editingInvoice.consolidatedItems||[]).map((item, i)=>{
-                        // 同 Step 4 邏輯，判斷顏色
-                        const originalItems = item.rawItemsIndex.map(
-                            originalIndex => editingInvoice.items.find(i => i.originalIndex === originalIndex)
-                        ).filter(Boolean);
-
-                        const hasNoMatch = originalItems.some(i => i.isNo);
-                        const hasNoRefMatch = originalItems.some(i => !i.isYes && !i.isNo);
+                        // 使用合併後的狀態來判斷顏色
+                        const hasNoMatch = item.consolidatedIsNo;
+                        const hasNoRefMatch = item.consolidatedIsNoRefMatch;
 
                         let bgColorClass = 'bg-gray-50';
                         if (hasNoMatch) {
