@@ -47,7 +47,7 @@
   <div id="root"></div>
 
   <script type="text/babel" data-presets="env,react">
-    const { useState, useEffect, useMemo } = React; // 引入 useMemo
+    const { useState, useEffect, useMemo } = React;
 
     const $$formatAmount = (n) => {
       const num = (typeof n === 'number') ? n : Number(n||0);
@@ -437,7 +437,7 @@
                   .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
                   .filter(it => it.name);
                 
-                // 新增：計算每個明細的符合狀態
+                // 計算每個明細的符合狀態
                 const itemStatuses = rawItems.map(item => checkItemMatch(item, inv.sellerId, useRef));
 
                 // 將狀態合併回明細項目中
@@ -451,13 +451,13 @@
                 const matchNoItems  = itemsWithStatus.filter(s => s.isNo).length;            // 符合不可扣抵 (isNo=true)
                 const noMatchItems  = itemsWithStatus.filter(s => !s.isYes && !s.isNo).length; // 皆不符合 (isYes=false, isNo=false)
 
-                // *********** 優化後的審核邏輯 ***********
+                // *********** 修正的審核邏輯 (不可扣抵優先，不進 Step 4) ***********
                 let buyerNote = '待查';
                 
                 if (totalItems === 0) {
                    buyerNote = '待查';
                 } else if (matchNoItems > 0) {
-                    // 只要有任何一筆明細符合不可扣抵 (isNo=true)，整張發票即為不可扣抵
+                    // 新增邏輯: 只要有任何一筆明細符合不可扣抵 (isNo=true)，整張發票即為不可扣抵
                     buyerNote = '不得抵扣之進貨及費用'; 
                 } else if (noMatchItems === 0) {
                     // 若沒有不可扣抵明細 (matchNoItems === 0) 
@@ -496,12 +496,12 @@
         const updated = [...refData, ...newRefs];
         setRefData(updated);
         setNewlyAddedRefData(prev => [...prev, ...newRefs]);
-        reprocessPendingInvoices(updated);
+        reprocessPendingInvoices(updated, true); // 傳遞參數指示為「新增關鍵字後的重新處理」
         return newRefs;
       };
 
-      // 優化 reprocessPendingInvoices 邏輯，避免重複計算已審核的項目
-      const reprocessPendingInvoices = (currentRefData) => {
+      // 修正 reprocessPendingInvoices 邏輯，確保新增關鍵字後能正確跳轉
+      const reprocessPendingInvoices = (currentRefData, isKeywordAdded = false) => {
         const currentNo = pendingReviews[currentReviewIndex]?.invoiceNumber;
         
         const reprocessed = invoiceData.map(inv => {
@@ -558,14 +558,27 @@
           // 3. 還有項目待審核
           setPendingReviews(stillPending);
           
-          // 4. 嘗試找到當前發票在新的待審核列表中的位置，如果找不到 (被自動審核通過了) 就從頭開始
-          const idx = stillPending.findIndex(i => i.invoiceNumber === currentNo);
+          // 4. 判斷新的索引位置
+          // 如果是新增關鍵字後重新處理，且當前發票已被手動審核，則新的 currentReviewIndex 應指向下一筆
+          let newIndex = currentReviewIndex; 
           
+          if (isKeywordAdded) {
+            // 因為 currentNo 在 handleReviewDecision 中已被手動標註為非 '待查'，所以它不在 stillPending 中。
+            // 我們只需確保索引在新的列表中有效，即保持 currentReviewIndex
+            if (newIndex >= stillPending.length) {
+                newIndex = Math.max(0, stillPending.length - 1);
+            }
+          } else {
+            // 非新增關鍵字（此處應為冗餘分支，因為 reprocessPendingInvoices 只有在 addKeywordsToRefData 中被調用）
+            const idx = stillPending.findIndex(i => i.invoiceNumber === currentNo);
+            newIndex = idx === -1 ? 0 : idx;
+          }
+
           setStep(4);
-          setCurrentReviewIndex(idx === -1 ? 0 : idx);
+          setCurrentReviewIndex(newIndex);
         }
       };
-
+      
       const handleReviewDecision = (decision) => {
         const current = pendingReviews[currentReviewIndex];
         const newBuyerNote = decision === 'deductible' ? '' : '不得抵扣之進貨及費用';
@@ -602,20 +615,20 @@
             // 還有未審核的項目
             setPendingReviews(allReviewedData);
             
-            // 下一筆發票的索引：保持不變 (因為當前項目被移除了)
+            // 下一筆發票的索引：保持原索引，因為當前項目被移除了
             const nextIndex = currentReviewIndex; 
             
             if (nextIndex < allReviewedData.length) {
                 setCurrentReviewIndex(nextIndex);
             } else {
-                // 如果是最後一筆，則 nextIndex 會超過範圍，將索引重設為最後一筆或 0
+                // 如果是最後一筆，則 nextIndex 會超過範圍，將索引重設為最後一筆（如果列表非空）或 0
                 setCurrentReviewIndex(Math.max(0, allReviewedData.length - 1));
             }
         }
       };
 
       const openEditModal = (invoice) => {
-        // 優化：避免在每次打開 modal 時都重新計算所有明細。
+        // 在開啟編輯模態框時，重新計算 consolidatedItems 的狀態
         const rawItems = invoiceDetailsData
             .filter(d => String(d.invoiceNumber).trim() === String(invoice.invoiceNumber).trim())
             .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
@@ -709,6 +722,25 @@
         } catch (e) {
           alert('下載失敗：' + (e?.message || String(e)));
         }
+      };
+
+      // 計算 Step 5 明細項目的背景色，基於明細的自動判斷狀態
+      const getStep5ItemBgClass = (inv, item) => {
+        const isNonDeductible = inv.buyerNote === '不得抵扣之進貨及費用';
+
+        if (isNonDeductible) {
+            // 如果發票整體被標記為不可扣抵，則顯示明細的自動判斷狀態
+            const hasNoMatch = item.consolidatedIsNo;
+            const hasNoRefMatch = item.consolidatedIsNoRefMatch;
+
+            if (hasNoMatch) {
+                return 'bg-custom-red'; // 符合不可扣抵規則
+            } else if (hasNoRefMatch) {
+                return 'bg-custom-yellow'; // 不符合任一規則
+            }
+        }
+        // 預設或可扣抵的發票，使用預設的灰色背景
+        return 'bg-gray-50';
       };
 
       return (
@@ -922,8 +954,11 @@
                           <h4 className="text-xs font-medium text-gray-700 mb-1">商品明細：</h4>
                           <div className="space-y-1">
                             {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.map((item, i)=>{
+                                // Step 5 新增的明細項目顏色邏輯
+                                const bgColorClass = getStep5ItemBgClass(inv, item);
+
                                 return (
-                                  <div key={i} className="bg-gray-50 px-2 py-1 rounded text-xs text-gray-800 flex justify-between items-center">
+                                  <div key={i} className={`${bgColorClass} px-2 py-1 rounded text-xs text-gray-800 flex justify-between items-center`}>
                                     <span>{item.name}{item.count>1?`（${item.count}項）`:''}</span>
                                     <span className="font-semibold">{$$formatAmount(item.amount)}元</span>
                                   </div>
