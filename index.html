@@ -41,18 +41,26 @@
     .bg-custom-red {
       background-color: rgb(254, 226, 226);
     }
-    /* 【修改】Pass/略過 項目顏色：淺紫色字/灰底 */
-    .bg-custom-dark-gray {
-      background-color: rgb(229, 231, 235); /* 淺灰底 (gray-200) */
-      color: #d7d9ff; /* 淺紫色字 (新需求) */
+    /* 【移除】自訂 .bg-custom-dark-gray */
+    /* .bg-custom-dark-gray {
+      background-color: rgb(229, 231, 235);
+      color: #d7d9ff;
     }
-    /* 【新增/修正】覆寫 .bg-custom-dark-gray 內部的文字顏色 */
     .bg-custom-dark-gray .text-default {
       color: #d7d9ff !important;
     }
-    /* 確保所有 Pass 項目的金額顏色也被正確設定 */
     .bg-custom-dark-gray .amount-default {
         color: #d7d9ff !important;
+    } */
+    /* 【新增】Pass 項目樣式，使用 Tailwind 灰底 (gray-200) 和 深灰字 (gray-600) */
+    .isPassStyles {
+        background-color: rgb(229, 231, 235); /* gray-200 */
+    }
+    .isPassStyles .text-pass {
+        color: rgb(75, 85, 99) !important; /* gray-600 */
+    }
+    .isPassStyles .amount-pass {
+        color: rgb(75, 85, 99) !important; /* gray-600 */
     }
   </style>
 </head>
@@ -724,12 +732,12 @@
                 // 檢查是否符合任一新的 Pass 關鍵字
                 const isMatch = keywordList.some(k => rawItem.name.includes(k));
                 if (isMatch) {
+                    // 【修正】確保只有在不是 Yes/No 的情況下才標記為 Pass，但由於這個是使用者手動標記，應該強制標記為 Pass
+                    const currentStatus = checkItemMatch(rawItem, inv.sellerId, refData);
+                    if (currentStatus.isYes || currentStatus.isNo) {
+                        return rawItem; // 如果已經是 Yes/No，則忽略手動 Pass
+                    }
                     return { ...rawItem, isPass: true }; // 標記原始明細
-                }
-                // 檢查是否符合已有的 Yes/No 規則，若符合則不標記 Pass
-                const currentStatus = checkItemMatch(rawItem, inv.sellerId, refData);
-                if (currentStatus.isYes || currentStatus.isNo) {
-                    return rawItem;
                 }
                 return rawItem;
               });
@@ -824,11 +832,10 @@
                 };
             }
         } else {
-             // 如果沒有新增關鍵字，但手動更改了 buyerNote，需要重新計算明細狀態以反映最新的 buyerNote
+             // 如果沒有新增關鍵字，但手動更改了 buyerNote
              const currentInvoiceIndex = updatedInvoiceData.findIndex(inv => inv.invoiceNumber === currentInv.invoiceNumber);
              if (currentInvoiceIndex !== -1) {
                 const inv = updatedInvoiceData[currentInvoiceIndex];
-                // 由於手動點擊 Yes/No，明細狀態不需要重新計算，只需要更新 buyerNote
                 updatedInvoiceData[currentInvoiceIndex] = { 
                     ...inv, 
                     buyerNote: newBuyerNote,
@@ -923,12 +930,13 @@
         const hasNoRefMatch = item.consolidatedIsNoRefMatch;
         const hasPassMatch = item.consolidatedIsPass;
 
+        // 【修正邏輯】優先顯示 Pass 狀態
         if (hasNoMatch) {
             return 'bg-custom-red'; 
+        } else if (hasPassMatch) {
+            return 'isPassStyles'; // 使用新的 Pass 樣式類別
         } else if (hasNoRefMatch) {
             return 'bg-custom-yellow'; 
-        } else if (hasPassMatch) {
-            return 'bg-custom-dark-gray'; 
         }
         return 'bg-white';
       };
@@ -937,30 +945,21 @@
       const getStep5ItemBgClass = (inv, item) => {
         const isNonDeductible = inv.buyerNote === '不得抵扣之進貨及費用';
         const isDeductible = inv.buyerNote === '';
-        const isPending = inv.buyerNote === '待查';
         
         const hasPassMatch = item.consolidatedIsPass; 
 
         // 如果發票整體已確認 (可扣抵/不可扣抵)，則明細以 pass/noMatch 為主
         if (isDeductible || isNonDeductible) {
-            if (item.consolidatedIsNo) {
-                return 'bg-custom-red';
-            } else if (item.consolidatedIsNoRefMatch) {
-                 return 'bg-custom-yellow';
-            } else if (hasPassMatch) {
-                return 'bg-custom-dark-gray'; 
-            }
-        }
+            const hasNoMatch = item.consolidatedIsNo;
+            const hasNoRefMatch = item.consolidatedIsNoRefMatch;
 
-        // 待查狀態的發票在 Step 5 不應該出現，但為防止出錯，保持灰色背景
-        if (isPending) {
-            // 在 Step 5 檢視時，如果發票仍是待查，則保持原來的顏色邏輯
-            if (item.consolidatedIsNo) {
-                return 'bg-custom-red'; 
-            } else if (item.consolidatedIsNoRefMatch) {
-                return 'bg-custom-yellow'; 
+            // 【修正邏輯】Step 5 也要優先顯示 Pass 狀態
+            if (hasNoMatch) {
+                return 'bg-custom-red';
             } else if (hasPassMatch) {
-                return 'bg-custom-dark-gray'; 
+                return 'isPassStyles'; // 使用新的 Pass 樣式類別
+            } else if (hasNoRefMatch) {
+                 return 'bg-custom-yellow';
             }
         }
         
@@ -994,9 +993,10 @@
         );
       };
 
-      // 輔助函式：判斷 Pass 顏色類別
+      // 輔助函式：判斷 Pass 顏色類別 (Tailwind)
       const getPassTextColorClass = (item) => {
-        return item.consolidatedIsPass ? "text-default amount-default" : "text-gray-800";
+        // 【修正】使用新的類別名稱，避免與 Tailwind 預設類別衝突
+        return item.consolidatedIsPass ? "text-pass amount-pass" : "text-gray-800";
       };
 
 
@@ -1131,13 +1131,13 @@
                         
                         return (
                           <div key={idx} className={`${bgColorClass} p-2 rounded shadow-sm flex justify-between items-center`}>
-                            {/* 【修正】移除原先的 text-gray-600/800，改用 passTextColorClass */}
-                            <span className={passTextColorClass}>
+                            {/* 【修正】應用 Pass 類別或預設顏色 */}
+                            <span className={itemWithTempStatus.consolidatedIsPass ? "text-pass" : "text-gray-800"}>
                               {item.name}{item.count>1?`（${item.count}項）`:''}
                             </span>
                             <div className="flex items-center gap-2">
-                                {/* 【修正】金額也使用 passTextColorClass */}
-                                <span className={`text-xs text-gray-900 font-semibold ${passTextColorClass}`}>{$$formatAmount(item.amount)}元</span>
+                                {/* 【修正】應用 Pass 類別或預設顏色 */}
+                                <span className={`text-xs text-gray-900 font-semibold ${itemWithTempStatus.consolidatedIsPass ? "amount-pass" : "text-gray-900"}`}>{$$formatAmount(item.amount)}元</span>
                                 {/* 【保留】略字按鈕，Step 4 顯示 */}
                                 {renderPassButton(item, pendingReviews[currentReviewIndex])}
                             </div>
@@ -1218,13 +1218,13 @@
 
                                 return (
                                   <div key={i} className={`${bgColorClass} px-2 py-1 rounded text-xs flex justify-between items-center`}>
-                                    {/* 【修正】移除原先的 text-gray-600/800，改用 passTextColorClass */}
-                                    <span className={passTextColorClass}>
+                                    {/* 【修正】應用 Pass 類別或預設顏色 */}
+                                    <span className={item.consolidatedIsPass ? "text-pass" : "text-gray-800"}>
                                       {item.name}{item.count>1?`（${item.count}項）`:''}
                                     </span>
                                     <div className="flex items-center gap-2">
-                                        {/* 【修正】金額也使用 passTextColorClass */}
-                                        <span className={`font-semibold ${passTextColorClass}`}>{$$formatAmount(item.amount)}元</span>
+                                        {/* 【修正】應用 Pass 類別或預設顏色 */}
+                                        <span className={`font-semibold ${item.consolidatedIsPass ? "amount-pass" : "text-gray-900"}`}>{$$formatAmount(item.amount)}元</span>
                                         {/* 【移除】Step 5 不顯示「略」按鈕 */}
                                     </div>
                                   </div>
@@ -1332,13 +1332,13 @@
                         
                         return (
                           <div key={i} className={`${bgColorClass} p-2 rounded text-xs flex justify-between items-center`}>
-                            {/* 【修正】移除原先的 text-gray-600/800，改用 passTextColorClass */}
-                            <span className={passTextColorClass}>
+                            {/* 【修正】應用 Pass 類別或預設顏色 */}
+                            <span className={itemWithTempStatus.consolidatedIsPass ? "text-pass" : "text-gray-800"}>
                               {item.name}{item.count>1?`（${item.count}項）`:''}
                             </span>
                             <div className="flex items-center gap-2">
-                                {/* 【修正】金額也使用 passTextColorClass */}
-                                <span className={`font-semibold ${passTextColorClass}`}>{$$formatAmount(item.amount)}元</span>
+                                {/* 【修正】應用 Pass 類別或預設顏色 */}
+                                <span className={`font-semibold ${itemWithTempStatus.consolidatedIsPass ? "amount-pass" : "text-gray-900"}`}>{$$formatAmount(item.amount)}元</span>
                                 {/* 【保留】略字按鈕，Edit Modal 顯示 */}
                                 {renderPassButton(item, editingInvoice)}
                             </div>
