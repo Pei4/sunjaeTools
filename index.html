@@ -906,7 +906,7 @@
         // 【修正邏輯】優先順序：紅 > 灰 > 黃
         if (hasNoMatch) {
             return 'bg-custom-red'; 
-        } else if (hasPassMatch) { // 僅在 No 不符合時檢查 Pass
+        } else if (hasPassMatch) { 
             return 'bg-custom-dark-gray'; 
         } else if (hasNoRefMatch) { 
             return 'bg-custom-yellow'; 
@@ -931,7 +931,7 @@
             return 'bg-custom-yellow'; 
         }
 
-        return 'bg-gray-50'; 
+        return 'bg-gray-50'; // 預設或可扣抵的發票
       };
 
       const renderPassButton = (item, invoice) => {
