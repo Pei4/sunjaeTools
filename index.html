@@ -46,6 +46,14 @@
       background-color: rgb(229, 231, 235); /* 淺灰底 (gray-200) */
       color: #d7d9ff; /* 淺紫色字 (新需求) */
     }
+    /* 【新增/修正】覆寫 .bg-custom-dark-gray 內部的文字顏色 */
+    .bg-custom-dark-gray .text-default {
+      color: #d7d9ff !important;
+    }
+    /* 確保所有 Pass 項目的金額顏色也被正確設定 */
+    .bg-custom-dark-gray .amount-default {
+        color: #d7d9ff !important;
+    }
   </style>
 </head>
 <body class="bg-gray-50">
@@ -718,6 +726,11 @@
                 if (isMatch) {
                     return { ...rawItem, isPass: true }; // 標記原始明細
                 }
+                // 檢查是否符合已有的 Yes/No 規則，若符合則不標記 Pass
+                const currentStatus = checkItemMatch(rawItem, inv.sellerId, refData);
+                if (currentStatus.isYes || currentStatus.isNo) {
+                    return rawItem;
+                }
                 return rawItem;
               });
 
@@ -815,6 +828,7 @@
              const currentInvoiceIndex = updatedInvoiceData.findIndex(inv => inv.invoiceNumber === currentInv.invoiceNumber);
              if (currentInvoiceIndex !== -1) {
                 const inv = updatedInvoiceData[currentInvoiceIndex];
+                // 由於手動點擊 Yes/No，明細狀態不需要重新計算，只需要更新 buyerNote
                 updatedInvoiceData[currentInvoiceIndex] = { 
                     ...inv, 
                     buyerNote: newBuyerNote,
@@ -980,6 +994,11 @@
         );
       };
 
+      // 輔助函式：判斷 Pass 顏色類別
+      const getPassTextColorClass = (item) => {
+        return item.consolidatedIsPass ? "text-default amount-default" : "text-gray-800";
+      };
+
 
       return (
         <div className="max-w-6xl mx-auto px-2 py-4">
@@ -1108,14 +1127,17 @@
 
                         const itemWithTempStatus = { ...item, consolidatedIsPass: isTempPassed };
                         const bgColorClass = getItemBgClass(itemWithTempStatus);
+                        const passTextColorClass = getPassTextColorClass(itemWithTempStatus);
                         
                         return (
                           <div key={idx} className={`${bgColorClass} p-2 rounded shadow-sm flex justify-between items-center`}>
-                            <span className={itemWithTempStatus.consolidatedIsPass ? "text-gray-600" : "text-gray-800"}>
+                            {/* 【修正】移除原先的 text-gray-600/800，改用 passTextColorClass */}
+                            <span className={passTextColorClass}>
                               {item.name}{item.count>1?`（${item.count}項）`:''}
                             </span>
                             <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-900 font-semibold">{$$formatAmount(item.amount)}元</span>
+                                {/* 【修正】金額也使用 passTextColorClass */}
+                                <span className={`text-xs text-gray-900 font-semibold ${passTextColorClass}`}>{$$formatAmount(item.amount)}元</span>
                                 {/* 【保留】略字按鈕，Step 4 顯示 */}
                                 {renderPassButton(item, pendingReviews[currentReviewIndex])}
                             </div>
@@ -1192,14 +1214,17 @@
                           <div className="space-y-1">
                             {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.map((item, i)=>{
                                 const bgColorClass = getStep5ItemBgClass(inv, item);
+                                const passTextColorClass = getPassTextColorClass(item);
 
                                 return (
-                                  <div key={i} className={`${bgColorClass} px-2 py-1 rounded text-xs text-gray-800 flex justify-between items-center`}>
-                                    <span className={item.consolidatedIsPass ? "text-gray-600" : "text-gray-800"}>
+                                  <div key={i} className={`${bgColorClass} px-2 py-1 rounded text-xs flex justify-between items-center`}>
+                                    {/* 【修正】移除原先的 text-gray-600/800，改用 passTextColorClass */}
+                                    <span className={passTextColorClass}>
                                       {item.name}{item.count>1?`（${item.count}項）`:''}
                                     </span>
                                     <div className="flex items-center gap-2">
-                                        <span className="font-semibold">{$$formatAmount(item.amount)}元</span>
+                                        {/* 【修正】金額也使用 passTextColorClass */}
+                                        <span className={`font-semibold ${passTextColorClass}`}>{$$formatAmount(item.amount)}元</span>
                                         {/* 【移除】Step 5 不顯示「略」按鈕 */}
                                     </div>
                                   </div>
@@ -1303,14 +1328,17 @@
 
                         const itemWithTempStatus = { ...item, consolidatedIsPass: isTempPassed };
                         const bgColorClass = getItemBgClass(itemWithTempStatus);
+                        const passTextColorClass = getPassTextColorClass(itemWithTempStatus);
                         
                         return (
                           <div key={i} className={`${bgColorClass} p-2 rounded text-xs flex justify-between items-center`}>
-                            <span className={itemWithTempStatus.consolidatedIsPass ? "text-gray-600" : "text-gray-800"}>
+                            {/* 【修正】移除原先的 text-gray-600/800，改用 passTextColorClass */}
+                            <span className={passTextColorClass}>
                               {item.name}{item.count>1?`（${item.count}項）`:''}
                             </span>
                             <div className="flex items-center gap-2">
-                                <span className="font-semibold">{$$formatAmount(item.amount)}元</span>
+                                {/* 【修正】金額也使用 passTextColorClass */}
+                                <span className={`font-semibold ${passTextColorClass}`}>{$$formatAmount(item.amount)}元</span>
                                 {/* 【保留】略字按鈕，Edit Modal 顯示 */}
                                 {renderPassButton(item, editingInvoice)}
                             </div>
