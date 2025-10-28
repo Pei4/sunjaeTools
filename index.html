@@ -41,7 +41,7 @@
     .bg-custom-red {
       background-color: rgb(254, 226, 226);
     }
-    /* Pass/略過 項目顏色：深灰字/灰底 */
+    /* 【修正】Pass/略過 項目顏色：深灰字/灰底 */
     .bg-custom-dark-gray {
       background-color: rgb(229, 231, 235); /* 淺灰底 (gray-200) */
       color: rgb(75, 85, 99); /* 深灰字 (gray-600) */
@@ -481,16 +481,19 @@
                 const matchNoItems  = itemsWithStatus.filter(s => s.isNo).length;            
                 const noMatchItems  = itemsWithStatus.filter(s => !s.isYes && !s.isNo && !s.isPass).length; 
 
-                // *********** 發票自動審核邏輯 ***********
+                // *********** 發票自動審核邏輯 (根據新要求調整) ***********
                 let buyerNote = '待查';
                 
                 if (totalItems === 0) {
                    buyerNote = '待查';
                 } else if (matchNoItems > 0) {
+                    // 1. 若有任一筆明細為不可扣抵，則該張發票註記為不可扣抵
                     buyerNote = '不得抵扣之進貨及費用'; 
                 } else if (noMatchItems === 0) {
+                    // 2. 若所有發票明細皆為可扣抵或略過，則註記為可扣抵
                     buyerNote = ''; 
                 } else { 
+                    // 3. 其餘不符上述條件，則繼續 Step 4 人工審核
                     buyerNote = '待查';
                 }
                 // **********************************
@@ -632,16 +635,7 @@
           });
         }
 
-        // 步驟 2: 若有新增規則 (Yes/No/Pass)，則觸發重新判斷和跳轉
-        if (newRefs.length > 0) {
-          // 將所有新規則添加到當前參考資料列表，再進行重新判斷
-          const updatedRefData = [...refData, ...newRefs];
-          reprocessPendingInvoices(updatedRefData); 
-        }
-
-        // 步驟 3: 處理發票狀態更新 (手動標記優先於自動判斷)
-        // 確保在 reprocessPendingInvoices 完成後，若發票仍然待查，才執行手動更新。
-        // 但由於發票可能已經被 reprocessPendingInvoices 處理，我們只需要更新這張發票的最終狀態即可。
+        // 步驟 2: 處理發票狀態更新 (手動標記優先於自動判斷)
         const updated = invoiceData.map(inv =>
           inv.invoiceNumber === current.invoiceNumber
             ? { ...inv, buyerNote: newBuyerNote }
@@ -649,8 +643,13 @@
         );
         setInvoiceData(updated);
 
-        // 步驟 4: 若無新增關鍵字，手動更新 pendingReviews 並跳轉/結束 (原邏輯不變)
-        if (newRefs.length === 0) {
+        // 步驟 3: 若有新增規則 (Yes/No/Pass)，則觸發重新判斷和跳轉
+        if (newRefs.length > 0) {
+          // 將所有新規則添加到當前參考資料列表，再進行重新判斷
+          const updatedRefData = [...refData, ...newRefs];
+          reprocessPendingInvoices(updatedRefData); 
+        } else {
+            // 步驟 4: 若無新增關鍵字，手動更新 pendingReviews 並跳轉/結束 (原邏輯不變)
             const allReviewedData = updated.filter(i => i.buyerNote === '待查');
             
             if (!allReviewedData.length) {
@@ -907,35 +906,38 @@
         const hasNoRefMatch = item.consolidatedIsNoRefMatch;
         const hasPassMatch = item.consolidatedIsPass;
 
-        // 【修正邏輯】優先順序：紅 > 灰 > 黃
         if (hasNoMatch) {
             return 'bg-custom-red'; 
-        } else if (hasPassMatch) { 
-            return 'bg-custom-dark-gray'; 
-        } else if (hasNoRefMatch) { 
+        } else if (hasNoRefMatch) {
             return 'bg-custom-yellow'; 
+        } else if (hasPassMatch) {
+            return 'bg-custom-dark-gray'; 
         }
-        return ''; // 默認為空字串，讓底層 bg-white 生效
+        return 'bg-white';
       };
 
       // 計算 Step 5 明細項目的背景色
       const getStep5ItemBgClass = (inv, item) => {
         const isNonDeductible = inv.buyerNote === '不得抵扣之進貨及費用';
         const hasPassMatch = item.consolidatedIsPass; 
-        const hasNoMatch = item.consolidatedIsNo;
-        const hasNoRefMatch = item.consolidatedIsNoRefMatch;
 
-        // 【修正邏輯】優先順序：紅 > 灰 > 黃
-        if (hasNoMatch) {
-            return 'bg-custom-red'; 
-        } else if (hasPassMatch) {
+        if (isNonDeductible) {
+            // 如果發票整體被標記為不可扣抵，則顯示明細的自動判斷狀態
+            const hasNoMatch = item.consolidatedIsNo;
+            const hasNoRefMatch = item.consolidatedIsNoRefMatch;
+
+            if (hasNoMatch) {
+                return 'bg-custom-red'; 
+            } else if (hasNoRefMatch) {
+                return 'bg-custom-yellow'; 
+            }
+        }
+        
+        if (hasPassMatch) {
             return 'bg-custom-dark-gray'; 
-        } else if (isNonDeductible && hasNoRefMatch) {
-            // 只有在發票整體是不可扣抵，且明細是未匹配時，才顯示黃色
-            return 'bg-custom-yellow'; 
         }
 
-        return 'bg-gray-50'; // 預設或可扣抵的發票
+        return 'bg-gray-50'; 
       };
 
       const renderPassButton = (item, invoice) => {
@@ -1098,7 +1100,6 @@
                             </span>
                             <div className="flex items-center gap-2">
                                 <span className="text-xs text-gray-900 font-semibold">{$$formatAmount(item.amount)}元</span>
-                                {/* 略字按鈕，Step 4 顯示 */}
                                 {renderPassButton(item, pendingReviews[currentReviewIndex])}
                             </div>
                           </div>
@@ -1166,7 +1167,7 @@
                             <span className="text-sm font-semibold text-gray-900">{inv.invoiceNumber}</span>
                             <span className="text-xs text-gray-500">{inv.sellerId} - {inv.sellerName}</span>
                           </div>
-                          {/* 修正 openEditModal 引用 */}
+                          {/* 【修正】openEditModal 引用 */}
                           <button onClick={()=>openEditModal(inv)} className="text-blue-600 hover:text-blue-900 font-medium text-xs">編輯</button>
                         </div>
 
@@ -1177,7 +1178,7 @@
                                 const bgColorClass = getStep5ItemBgClass(inv, item);
 
                                 return (
-                                  <div key={i} className={`bg-gray-50 ${bgColorClass} px-2 py-1 rounded text-xs flex justify-between items-center`}>
+                                  <div key={i} className={`${bgColorClass} px-2 py-1 rounded text-xs text-gray-800 flex justify-between items-center`}>
                                     <span className={item.consolidatedIsPass ? "text-gray-600" : "text-gray-800"}>
                                       {item.name}{item.count>1?`（${item.count}項）`:''}
                                     </span>
@@ -1287,8 +1288,7 @@
                         const bgColorClass = getItemBgClass(itemWithTempStatus);
                         
                         return (
-                          // 【修正】使用基礎白色，並疊加自訂顏色類名
-                          <div key={i} className={`bg-white ${bgColorClass} p-2 rounded text-xs flex justify-between items-center`}>
+                          <div key={i} className={`bg-gray-50 ${bgColorClass} p-2 rounded text-xs flex justify-between items-center`}>
                             <span className={itemWithTempStatus.consolidatedIsPass ? "text-gray-600" : "text-gray-800"}>
                               {item.name}{item.count>1?`（${item.count}項）`:''}
                             </span>
