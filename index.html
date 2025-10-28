@@ -41,10 +41,10 @@
     .bg-custom-red {
       background-color: rgb(254, 226, 226);
     }
-    /* 【修改】Pass/略過 項目顏色：深灰字/灰底 */
+    /* 【修改】Pass/略過 項目顏色：淺紫色字/灰底 */
     .bg-custom-dark-gray {
       background-color: rgb(229, 231, 235); /* 淺灰底 (gray-200) */
-      color: rgb(75, 85, 99); /* 深灰字 (gray-600) */
+      color: #d7d9ff; /* 淺紫色字 (新需求) */
     }
   </style>
 </head>
@@ -673,7 +673,7 @@
             }
         }
       };
-
+      
       // 開啟 Pass 模態框
       const openPassModal = (item, invoice) => {
           const defaultKeyword = item.name; 
@@ -732,6 +732,14 @@
           setPassKeywordInput('');
           setCurrentPassItem(null);
           setShowPassModal(false);
+      };
+      
+      // 【新增】openEditModal 函式，解決 Step 5 點擊編輯按鈕的錯誤
+      const openEditModal = (invoice) => {
+        setEditingInvoice(invoice);
+        setNewKeyword('');
+        setEditIncludeSellerID(false);
+        setShowEditModal(true);
       };
 
       const closeEditModal = () => { setShowEditModal(false); setEditingInvoice(null); setNewKeyword(''); setEditIncludeSellerID(false); };
@@ -797,10 +805,21 @@
 
                 updatedInvoiceData[currentInvoiceIndex] = { 
                     ...inv, 
+                    buyerNote: newBuyerNote, // 再次確保手動決策覆蓋自動判斷
                     items: itemsWithStatus, 
                     consolidatedItems: consolidatedItemsWithStatus 
                 };
             }
+        } else {
+             // 如果沒有新增關鍵字，但手動更改了 buyerNote，需要重新計算明細狀態以反映最新的 buyerNote
+             const currentInvoiceIndex = updatedInvoiceData.findIndex(inv => inv.invoiceNumber === currentInv.invoiceNumber);
+             if (currentInvoiceIndex !== -1) {
+                const inv = updatedInvoiceData[currentInvoiceIndex];
+                updatedInvoiceData[currentInvoiceIndex] = { 
+                    ...inv, 
+                    buyerNote: newBuyerNote,
+                };
+             }
         }
         
         setInvoiceData(updatedInvoiceData);
@@ -903,36 +922,51 @@
       // 計算 Step 5 明細項目的背景色
       const getStep5ItemBgClass = (inv, item) => {
         const isNonDeductible = inv.buyerNote === '不得抵扣之進貨及費用';
+        const isDeductible = inv.buyerNote === '';
+        const isPending = inv.buyerNote === '待查';
+        
         const hasPassMatch = item.consolidatedIsPass; 
 
-        if (isNonDeductible) {
-            // 如果發票整體被標記為不可扣抵，則顯示明細的自動判斷狀態
-            const hasNoMatch = item.consolidatedIsNo;
-            const hasNoRefMatch = item.consolidatedIsNoRefMatch;
+        // 如果發票整體已確認 (可扣抵/不可扣抵)，則明細以 pass/noMatch 為主
+        if (isDeductible || isNonDeductible) {
+            if (item.consolidatedIsNo) {
+                return 'bg-custom-red';
+            } else if (item.consolidatedIsNoRefMatch) {
+                 return 'bg-custom-yellow';
+            } else if (hasPassMatch) {
+                return 'bg-custom-dark-gray'; 
+            }
+        }
 
-            if (hasNoMatch) {
+        // 待查狀態的發票在 Step 5 不應該出現，但為防止出錯，保持灰色背景
+        if (isPending) {
+            // 在 Step 5 檢視時，如果發票仍是待查，則保持原來的顏色邏輯
+            if (item.consolidatedIsNo) {
                 return 'bg-custom-red'; 
-            } else if (hasNoRefMatch) {
+            } else if (item.consolidatedIsNoRefMatch) {
                 return 'bg-custom-yellow'; 
+            } else if (hasPassMatch) {
+                return 'bg-custom-dark-gray'; 
             }
         }
         
-        if (hasPassMatch) {
-            return 'bg-custom-dark-gray'; 
-        }
-
         return 'bg-gray-50'; 
       };
 
+      // 【修改】renderPassButton 邏輯：只在黃底（待查）時顯示
       const renderPassButton = (item, invoice) => {
-        // 【控制】只在 Step 4 和 Step 5 編輯模式中顯示
-        const isStep4 = step === 4;
+        // 【控制】只在 Step 4 和 Edit Modal 顯示
+        const isStep4 = step === 4 && pendingReviews.length > 0;
         const isEditModal = showEditModal;
         
         if (!isStep4 && !isEditModal) return null;
         
+        // 【新增邏輯】只在項目為黃底 (consolidatedIsNoRefMatch) 時才顯示
+        if (!item.consolidatedIsNoRefMatch) return null;
+
         // 判斷當前發票資訊：
         const currentInvoice = isStep4 ? pendingReviews[currentReviewIndex] : editingInvoice;
+        if (!currentInvoice) return null;
 
         return (
             <button onClick={(e)=>{
