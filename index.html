@@ -632,7 +632,16 @@
           });
         }
 
-        // 步驟 2: 處理發票狀態更新 (手動標記優先於自動判斷)
+        // 步驟 2: 若有新增規則 (Yes/No/Pass)，則觸發重新判斷和跳轉
+        if (newRefs.length > 0) {
+          // 將所有新規則添加到當前參考資料列表，再進行重新判斷
+          const updatedRefData = [...refData, ...newRefs];
+          reprocessPendingInvoices(updatedRefData); 
+        }
+
+        // 步驟 3: 處理發票狀態更新 (手動標記優先於自動判斷)
+        // 確保在 reprocessPendingInvoices 完成後，若發票仍然待查，才執行手動更新。
+        // 但由於發票可能已經被 reprocessPendingInvoices 處理，我們只需要更新這張發票的最終狀態即可。
         const updated = invoiceData.map(inv =>
           inv.invoiceNumber === current.invoiceNumber
             ? { ...inv, buyerNote: newBuyerNote }
@@ -640,13 +649,8 @@
         );
         setInvoiceData(updated);
 
-        // 步驟 3: 若有新增規則 (Yes/No/Pass)，則觸發重新判斷和跳轉
-        if (newRefs.length > 0) {
-          // 將所有新規則添加到當前參考資料列表，再進行重新判斷
-          const updatedRefData = [...refData, ...newRefs];
-          reprocessPendingInvoices(updatedRefData); 
-        } else {
-            // 步驟 4: 若無新增關鍵字，手動更新 pendingReviews 並跳轉/結束 (原邏輯不變)
+        // 步驟 4: 若無新增關鍵字，手動更新 pendingReviews 並跳轉/結束 (原邏輯不變)
+        if (newRefs.length === 0) {
             const allReviewedData = updated.filter(i => i.buyerNote === '待查');
             
             if (!allReviewedData.length) {
@@ -1283,7 +1287,8 @@
                         const bgColorClass = getItemBgClass(itemWithTempStatus);
                         
                         return (
-                          <div key={i} className={`bg-gray-50 ${bgColorClass} p-2 rounded text-xs flex justify-between items-center`}>
+                          // 【修正】使用基礎白色，並疊加自訂顏色類名
+                          <div key={i} className={`bg-white ${bgColorClass} p-2 rounded text-xs flex justify-between items-center`}>
                             <span className={itemWithTempStatus.consolidatedIsPass ? "text-gray-600" : "text-gray-800"}>
                               {item.name}{item.count>1?`（${item.count}項）`:''}
                             </span>
