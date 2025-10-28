@@ -41,6 +41,10 @@
     .bg-custom-red {
       background-color: rgb(254, 226, 226);
     }
+    /* 【新增】Pass/略過 項目顏色 */
+    .bg-custom-gray {
+      background-color: rgb(243, 244, 246); /* Tailwind's gray-100 或自訂淺灰 */
+    }
   </style>
 </head>
 <body class="bg-gray-50">
@@ -92,6 +96,7 @@
         if (!obj || typeof obj !== 'object') return null;
         const src = obj.fields ? obj.fields : obj;
         const customerId = String(src.customerId ?? fallbackCustomerId ?? '').trim();
+        // 【修改】允許 'Pass' 作為 deductable 狀態
         const deductable = (src.deductable ?? src.deductible ?? '').toString().trim();
         const sellerId   = (src.sellerId ?? '').toString().trim();
         const keyword    = (src.keyword ?? '').toString().trim();
@@ -177,6 +182,11 @@
       const [showEditModal, setShowEditModal] = useState(false);
       const [editingInvoice, setEditingInvoice] = useState(null);
       const [newlyAddedRefData, setNewlyAddedRefData] = useState([]);
+      
+      // 【新增】Pass Modal 相關狀態
+      const [showPassModal, setShowPassModal] = useState(false);
+      const [currentPassItem, setCurrentPassItem] = useState(null); // 儲存當前點擊的明細資料
+      const [passKeywordInput, setPassKeywordInput] = useState(''); // 儲存輸入的 Pass 關鍵字
 
       const [n8nGetStatus, setN8nGetStatus] = useState(null);
       const [n8nAddStatus, setN8nAddStatus] = useState(null);
@@ -217,7 +227,9 @@
           
           // 彙整合併項目的明細狀態，方便渲染時判斷顏色
           const hasAnyNo = similarIdx.some(k => items[k].isNo);
-          const hasAnyNoRefMatch = similarIdx.some(k => !items[k].isYes && !items[k].isNo); 
+          const hasAnyPass = similarIdx.some(k => items[k].isPass); // 【新增】檢查是否包含 Pass 項目
+          // 【修改】 consolidatedIsNoRefMatch: 既非 Yes, 亦非 No, 亦非 Pass
+          const hasAnyNoRefMatch = similarIdx.some(k => !items[k].isYes && !items[k].isNo && !items[k].isPass); 
 
           res.push({ 
             name, 
@@ -226,6 +238,7 @@
             rawItemsIndex,
             consolidatedIsNo: hasAnyNo, 
             consolidatedIsNoRefMatch: hasAnyNoRefMatch,
+            consolidatedIsPass: hasAnyPass, // 【新增】傳遞 Pass 狀態
           });
         }
         return res;
@@ -327,11 +340,13 @@
         const itemSellerId = String(sellerId).trim();
         const itemName = String(item.name || item.itemName || '').trim();
 
-        const yesRefs = refData.filter(r => r.deductable === 'Yes');
-        const noRefs  = refData.filter(r => r.deductable === 'No');
+        const yesRefs  = refData.filter(r => r.deductable === 'Yes');
+        const noRefs   = refData.filter(r => r.deductable === 'No');
+        const passRefs = refData.filter(r => r.deductable === 'Pass'); // 【新增】Pass 規則
 
         let isYes = false;
         let isNo = false;
+        let isPass = false; // 【新增】
 
         // 檢查是否符合可扣抵
         isYes = yesRefs.some(r => {
@@ -358,7 +373,23 @@
           return false;
         });
 
-        return { isYes, isNo };
+        // 【新增】檢查是否符合模糊項目 (isPass)
+        if (!isYes && !isNo) { // 只有當前項目沒有被 Yes 或 No 規則命中時，才檢查是否為 Pass 項目
+            isPass = passRefs.some(r => {
+                const rs = String(r.sellerId||'').trim();
+                const rk = (r.keyword||'').toString();
+                const sellerMatch = rs && rs === itemSellerId;
+                const keywordMatch = rk && itemName.includes(rk);
+                
+                // Pass 規則判斷：賣方統編符合或關鍵字符合其一
+                if (rs && rk) return sellerMatch || keywordMatch;
+                if (rs && !rk) return sellerMatch;
+                if (!rs && rk) return keywordMatch;
+                return false;
+            });
+        }
+
+        return { isYes, isNo, isPass }; // 【修改】回傳結果
       };
       
       const searchRefData = async (customerIdParam, invoicesArg, detailsArg) => {
@@ -413,8 +444,8 @@
           setStep(4);
         } else {
           const sorted = [...data].sort((a,b)=>{
-            const av = a.deductable === 'No' ? 0 : 1;
-            const bv = b.deductable === 'No' ? 0 : 1;
+            const av = a.deductable === 'No' ? 0 : a.deductable === 'Pass' ? 1 : 2; // 【修改】No 優先於 Pass 優先於 Yes
+            const bv = b.deductable === 'No' ? 0 : b.deductable === 'Pass' ? 1 : 2;
             return av - bv;
           });
           setRefData(sorted);
@@ -449,19 +480,20 @@
                 // 統計數量
                 const totalItems = itemsWithStatus.length;
                 const matchNoItems  = itemsWithStatus.filter(s => s.isNo).length;            // 符合不可扣抵 (isNo=true)
-                const noMatchItems  = itemsWithStatus.filter(s => !s.isYes && !s.isNo).length; // 皆不符合 (isYes=false, isNo=false)
+                // 【修改】noMatchItems: 既非 Yes, 亦非 No, 亦非 Pass
+                const noMatchItems  = itemsWithStatus.filter(s => !s.isYes && !s.isNo && !s.isPass).length; 
 
-                // *********** 修正的審核邏輯 (不可扣抵優先，不進 Step 4) ***********
+                // *********** 修正的審核邏輯 (不可扣抵優先，Pass 不影響最終判斷) ***********
                 let buyerNote = '待查';
                 
                 if (totalItems === 0) {
                    buyerNote = '待查';
                 } else if (matchNoItems > 0) {
-                    // 新增邏輯: 只要有任何一筆明細符合不可扣抵 (isNo=true)，整張發票即為不可扣抵
+                    // 只要有任何一筆明細符合不可扣抵 (isNo=true)，整張發票即為不可扣抵
                     buyerNote = '不得抵扣之進貨及費用'; 
                 } else if (noMatchItems === 0) {
                     // 若沒有不可扣抵明細 (matchNoItems === 0) 
-                    // 且所有明細至少符合可扣抵或不可扣抵任一條 (noMatchItems === 0)
+                    // 且所有明細都被 Yes 或 No 或 Pass 規則命中 (noMatchItems === 0)
                     // 則整張發票為可扣抵
                     buyerNote = ''; 
                 } else { 
@@ -523,7 +555,8 @@
           }));
 
           const matchNoItems  = itemsWithStatus.filter(s => s.isNo).length;
-          const noMatchItems  = itemsWithStatus.filter(s => !s.isYes && !s.isNo).length;
+          // 【修改】noMatchItems: 既非 Yes, 亦非 No, 亦非 Pass
+          const noMatchItems  = itemsWithStatus.filter(s => !s.isYes && !s.isNo && !s.isPass).length;
 
           let buyerNote = '待查';
           if (totalItems === 0) {
@@ -559,19 +592,27 @@
           setPendingReviews(stillPending);
           
           // 4. 判斷新的索引位置
-          // 如果是新增關鍵字後重新處理，且當前發票已被手動審核，則新的 currentReviewIndex 應指向下一筆
           let newIndex = currentReviewIndex; 
           
           if (isKeywordAdded) {
-            // 因為 currentNo 在 handleReviewDecision 中已被手動標註為非 '待查'，所以它不在 stillPending 中。
-            // 我們只需確保索引在新的列表中有效，即保持 currentReviewIndex
-            if (newIndex >= stillPending.length) {
-                newIndex = Math.max(0, stillPending.length - 1);
+            // 如果是新增關鍵字後重新處理，且當前發票可能被自動審核完成，則重新定位索引
+            const idx = stillPending.findIndex(i => i.invoiceNumber === currentNo);
+            if (idx === -1) {
+              // 當前發票已不在待審列表中，索引保持 currentReviewIndex
+              if (newIndex >= stillPending.length) {
+                  newIndex = Math.max(0, stillPending.length - 1);
+              }
+            } else {
+              // 當前發票仍在待審列表中，保持原索引
+              newIndex = idx;
             }
           } else {
-            // 非新增關鍵字（此處應為冗餘分支，因為 reprocessPendingInvoices 只有在 addKeywordsToRefData 中被調用）
+            // 非新增關鍵字 (手動審核)
             const idx = stillPending.findIndex(i => i.invoiceNumber === currentNo);
-            newIndex = idx === -1 ? 0 : idx;
+            newIndex = idx === -1 ? currentReviewIndex : idx;
+            if (newIndex >= stillPending.length) {
+              newIndex = Math.max(0, stillPending.length - 1);
+            }
           }
 
           setStep(4);
@@ -591,7 +632,7 @@
         );
         setInvoiceData(updated);
 
-        // 步驟 2: 處理關鍵字新增
+        // 步驟 2: 處理關鍵字新增 (Yes 或 No)
         if (newKeyword.trim()) {
           const sellerId = includeSellerID ? current.sellerId : '';
           const deductable = decision === 'deductible' ? 'Yes' : 'No';
@@ -670,6 +711,38 @@
         closeEditModal();
       };
 
+      // 【新增】開啟 Pass 模態框
+      const openPassModal = (item, invoice) => {
+          const defaultKeyword = item.name; 
+          setCurrentPassItem({
+              name: item.name,
+              sellerId: invoice.sellerId,
+              invoiceNumber: invoice.invoiceNumber,
+              // 找出原始明細的索引
+              rawItemsIndex: item.rawItemsIndex, 
+          });
+          setPassKeywordInput(defaultKeyword); // 預設輸入框內容為明細名稱
+          setShowPassModal(true);
+      };
+
+      // 【新增】處理 Pass 模態框確認
+      const handleConfirmPassKeyword = () => {
+          if (!passKeywordInput.trim() || !currentPassItem) return;
+
+          // 步驟 1: 新增 Pass 規則
+          const sellerId = currentPassItem.sellerId; 
+          addKeywordsToRefData(passKeywordInput, 'Pass', sellerId);
+          
+          // 步驟 2: 清理並關閉模態框
+          setPassKeywordInput('');
+          setCurrentPassItem(null);
+          setShowPassModal(false);
+          
+          // **注意：** addKeywordsToRefData 內部已呼叫 reprocessPendingInvoices，
+          // 會自動更新所有待查發票的狀態，並將被新 Pass 規則命中的明細標註為 Pass (灰底)。
+      };
+
+
       const handleConfirmCompletion = async () => {
         setStep(6);
         if (!newlyAddedRefData.length) { setN8nAddStatus('ok'); return; }
@@ -727,6 +800,8 @@
       // 計算 Step 5 明細項目的背景色，基於明細的自動判斷狀態
       const getStep5ItemBgClass = (inv, item) => {
         const isNonDeductible = inv.buyerNote === '不得抵扣之進貨及費用';
+        // 【新增】檢查是否有 Pass 項目
+        const hasPassMatch = item.consolidatedIsPass; 
 
         if (isNonDeductible) {
             // 如果發票整體被標記為不可扣抵，則顯示明細的自動判斷狀態
@@ -736,9 +811,15 @@
             if (hasNoMatch) {
                 return 'bg-custom-red'; // 符合不可扣抵規則
             } else if (hasNoRefMatch) {
-                return 'bg-custom-yellow'; // 不符合任一規則
+                return 'bg-custom-yellow'; // 不符合任一規則 (需要人工審核)
             }
         }
+        
+        // 【新增邏輯】如果發票不是不可扣抵，或以上邏輯未命中，檢查 Pass 狀態
+        if (hasPassMatch) {
+            return 'bg-custom-gray'; // 模糊項目顯示灰底
+        }
+
         // 預設或可扣抵的發票，使用預設的灰色背景
         return 'bg-gray-50';
       };
@@ -798,8 +879,9 @@
                           {refData.map((ref, idx) => (
                             <tr key={idx} className="border-b border-gray-200">
                               <td className="py-2 px-2 text-center">
-                                <span className={`${ref.deductable==='Yes'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'} inline-flex px-2 py-1 text-xs font-medium rounded-full`}>
-                                  {ref.deductable==='Yes'?'可扣抵':'不可扣抵'}
+                                {/* 【修改】增加 Pass 的顯示樣式 */}
+                                <span className={`${ref.deductable==='Yes'?'bg-green-100 text-green-700': ref.deductable==='No'?'bg-red-100 text-red-700':'bg-gray-100 text-gray-700'} inline-flex px-2 py-1 text-xs font-medium rounded-full`}>
+                                  {ref.deductable==='Yes'?'可扣抵': ref.deductable==='No'?'不可扣抵':'模糊項目'}
                                 </span>
                               </td>
                               <td className="py-2 px-2 text-gray-600 text-center">{ref.sellerId || '-'}</td>
@@ -864,14 +946,17 @@
                         // 使用合併後的狀態來判斷顏色
                         const hasNoMatch = item.consolidatedIsNo;
                         const hasNoRefMatch = item.consolidatedIsNoRefMatch;
+                        const hasPassMatch = item.consolidatedIsPass; // 【新增】Pass 狀態
 
                         let bgColorClass = 'bg-white';
                         if (hasNoMatch) {
-                            bgColorClass = 'bg-custom-red'; // 替換為自訂淺紅色
+                            bgColorClass = 'bg-custom-red'; // 不可扣抵
                         } else if (hasNoRefMatch) {
-                            bgColorClass = 'bg-custom-yellow'; // 替換為自訂淺黃色
+                            bgColorClass = 'bg-custom-yellow'; // 待查 (無規則匹配)
+                        } else if (hasPassMatch) {
+                            bgColorClass = 'bg-custom-gray'; // 【新增】模糊項目 (Pass)
                         } else {
-                            bgColorClass = 'bg-white'; // 皆符合可扣抵，維持白色
+                            bgColorClass = 'bg-white'; // 皆符合可扣抵
                         }
                         
                         return (
@@ -879,7 +964,17 @@
                             <span className="text-xs text-gray-800">
                               {item.name}{item.count>1?`（${item.count}項）`:''}
                             </span>
-                            <span className="text-xs text-gray-900 font-semibold">{$$formatAmount(item.amount)}元</span>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs text-gray-900 font-semibold">{$$formatAmount(item.amount)}元</span>
+                                {/* 【新增】略字按鈕 */}
+                                <button onClick={(e)=>{
+                                            e.stopPropagation();
+                                            openPassModal(item, pendingReviews[currentReviewIndex]);
+                                        }}
+                                        className="w-5 h-5 rounded-full bg-gray-300 text-gray-700 text-xs font-bold flex items-center justify-center hover:bg-gray-400 transition-colors">
+                                    略
+                                </button>
+                            </div>
                           </div>
                         );
                       })}
@@ -954,13 +1049,23 @@
                           <h4 className="text-xs font-medium text-gray-700 mb-1">商品明細：</h4>
                           <div className="space-y-1">
                             {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.map((item, i)=>{
-                                // Step 5 新增的明細項目顏色邏輯
+                                // Step 5 明細項目顏色邏輯
                                 const bgColorClass = getStep5ItemBgClass(inv, item);
 
                                 return (
                                   <div key={i} className={`${bgColorClass} px-2 py-1 rounded text-xs text-gray-800 flex justify-between items-center`}>
                                     <span>{item.name}{item.count>1?`（${item.count}項）`:''}</span>
-                                    <span className="font-semibold">{$$formatAmount(item.amount)}元</span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-semibold">{$$formatAmount(item.amount)}元</span>
+                                        {/* 【新增】略字按鈕 */}
+                                        <button onClick={(e)=>{
+                                                    e.stopPropagation();
+                                                    openPassModal(item, inv); // inv 即為當前發票
+                                                }}
+                                                className="w-5 h-5 rounded-full bg-gray-300 text-gray-700 text-xs font-bold flex items-center justify-center hover:bg-gray-400 transition-colors">
+                                            略
+                                        </button>
+                                    </div>
                                   </div>
                                 );
                             }) : (
@@ -1020,6 +1125,7 @@
                             setPendingReviews([]); setCurrentReviewIndex(0);
                             setError(''); setNewlyAddedRefData([]);
                             setInfo(''); setN8nAddStatus(null); setN8nGetStatus(null); setRefData([]); setFixedRefData([]);
+                            setShowPassModal(false); setCurrentPassItem(null); setPassKeywordInput(''); // 【新增】清空 Pass 狀態
                           }}
                           className="w-full md:w-64 bg-blue-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-600 transition-colors">
                     處理新檔案
@@ -1056,12 +1162,15 @@
                         // 使用合併後的狀態來判斷顏色
                         const hasNoMatch = item.consolidatedIsNo;
                         const hasNoRefMatch = item.consolidatedIsNoRefMatch;
+                        const hasPassMatch = item.consolidatedIsPass; // 【新增】Pass 狀態
 
                         let bgColorClass = 'bg-gray-50';
                         if (hasNoMatch) {
-                            bgColorClass = 'bg-custom-red'; // 替換為自訂淺紅色
+                            bgColorClass = 'bg-custom-red'; // 不可扣抵
                         } else if (hasNoRefMatch) {
-                            bgColorClass = 'bg-custom-yellow'; // 替換為自訂淺黃色
+                            bgColorClass = 'bg-custom-yellow'; // 待查 (無規則匹配)
+                        } else if (hasPassMatch) {
+                            bgColorClass = 'bg-custom-gray'; // 【新增】模糊項目 (Pass)
                         } else {
                             bgColorClass = 'bg-gray-50';
                         }
@@ -1069,7 +1178,17 @@
                         return (
                           <div key={i} className={`${bgColorClass} p-2 rounded text-xs flex justify-between items-center`}>
                             <span className="text-gray-800">{item.name}{item.count>1?`（${item.count}項）`:''}</span>
-                            <span className="font-semibold">{$$formatAmount(item.amount)}元</span>
+                            <div className="flex items-center gap-2">
+                                <span className="font-semibold">{$$formatAmount(item.amount)}元</span>
+                                {/* 【新增】略字按鈕 */}
+                                <button onClick={(e)=>{
+                                            e.stopPropagation();
+                                            openPassModal(item, editingInvoice); // editingInvoice 即為當前發票
+                                        }}
+                                        className="w-5 h-5 rounded-full bg-gray-300 text-gray-700 text-xs font-bold flex items-center justify-center hover:bg-gray-400 transition-colors">
+                                    略
+                                </button>
+                            </div>
                           </div>
                         );
                       })}
@@ -1109,6 +1228,48 @@
                   </div>
                 </div>
               </div>
+            )}
+            
+            {/* 【新增】Pass 關鍵字設定模態框 */}
+            {showPassModal && currentPassItem && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 max-w-sm w-full mx-4 relative">
+                        <h3 className="text-lg font-bold mb-4">請輸入需略過的關鍵字</h3>
+                        
+                        {/* 右上角 X 關閉 */}
+                        <button onClick={() => setShowPassModal(false)} className="absolute top-3 right-3 text-gray-500 hover:text-gray-800">
+                            <Icon name="x" className="w-5 h-5"/>
+                        </button>
+
+                        {/* 原始明細名稱 */}
+                        <div className="mb-3 p-2 bg-gray-100 rounded">
+                            <label className="block text-xs font-medium text-gray-500">原始明細：</label>
+                            <p className="text-sm font-semibold">{currentPassItem.name}</p>
+                        </div>
+
+                        {/* 關鍵字輸入框 */}
+                        <div className="mb-4">
+                            <label htmlFor="pass-keyword-input" className="block text-sm font-medium text-gray-700 mb-1">略過關鍵字：</label>
+                            <input type="text" id="pass-keyword-input"
+                                value={passKeywordInput}
+                                onChange={e => setPassKeywordInput(e.target.value)}
+                                placeholder="輸入關鍵字，多個請用逗號分隔"
+                                className="w-full p-2 border border-gray-300 rounded-lg"/>
+                        </div>
+
+                        <div className="flex justify-end gap-3">
+                            <button onClick={() => setShowPassModal(false)}
+                                    className="bg-gray-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-gray-600">
+                                取消
+                            </button>
+                            <button onClick={handleConfirmPassKeyword}
+                                    disabled={!passKeywordInput.trim()}
+                                    className="bg-blue-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-600 disabled:bg-blue-300">
+                                確認
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
           </div>
         </div>
