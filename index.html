@@ -957,6 +957,7 @@
         const hasNoRefMatch = item.consolidatedIsNoRefMatch;
         const hasPassMatch = item.consolidatedIsPass;
 
+        // 獨立判斷邏輯：只看明細自身的 Yes/No/Pass 狀態
         if (hasNoMatch) {
             return 'bg-custom-red'; 
         } else if (hasPassMatch) {
@@ -969,7 +970,7 @@
 
       // 計算 Step 5 明細項目的背景色
       const getStep5ItemBgClass = (inv, item) => {
-        // Step 5 明細顏色與 getItemBgClass 保持一致
+        // 【修正點 1】Step 5 明細顏色與 getItemBgClass 保持一致，不再受 inv.buyerNote 影響
         const hasNoMatch = item.consolidatedIsNo;
         const hasNoRefMatch = item.consolidatedIsNoRefMatch;
         const hasPassMatch = item.consolidatedIsPass;
@@ -988,7 +989,7 @@
       // 判斷賣方統編是否被標記為「不可扣抵」
       const isSellerIdNonDeductible = (sellerId) => {
           if (!sellerId) return false;
-          // 檢查 refData 中是否有純統編匹配的 'No' 規則
+          // 【修正點 2】純粹檢查 refData 中是否有該統編的「不可扣抵」規則 (keyword 為空)
           return refData.some(r => r.deductable === 'No' && r.sellerId === sellerId.trim() && !r.keyword);
       };
 
@@ -1222,7 +1223,7 @@
                     if (d) statusText = '可扣抵';
                     else if (nd) statusText = '不可扣抵';
                     
-                    // 【優化點 3】Step 5 列表中，不可扣抵統編紅底
+                    // 賣方統編底色判斷
                     const isNonDeductibleSellerId = isSellerIdNonDeductible(inv.sellerId);
 
                     return (
@@ -1234,7 +1235,7 @@
                             </span>
                             <span className="text-sm font-semibold text-gray-900">{inv.invoiceNumber}</span>
                             <span className="text-xs text-gray-500">
-                                {/* 僅在統編上套用紅底樣式 */}
+                                {/* 【修正點 2】僅在統編上套用紅底樣式，與發票狀態無關 */}
                                 <span className={isNonDeductibleSellerId ? 'seller-id-non-deductible' : ''}>
                                     {inv.sellerId}
                                 </span> - {inv.sellerName}
@@ -1247,7 +1248,7 @@
                           <h4 className="text-xs font-medium text-gray-700 mb-1">商品明細：</h4>
                           <div className="space-y-1">
                             {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.map((item, i)=>{
-                                {/* 明細顏色仍按照原先的規則：紅底、灰底、黃底 */}
+                                {/* 【修正點 1】明細顏色完全依賴自身的 Item-level 規則 */}
                                 const bgColorClass = getStep5ItemBgClass(inv, item);
                                 const passTextColorClass = getPassTextColorClass(item);
 
@@ -1348,7 +1349,7 @@
                               <label htmlFor="edit-use-seller-id-only" className="text-xs text-gray-700">直接使用賣方統編判斷</label>
                           </div>
                       </div>
-                      {/* 【優化點 3】編輯畫面中，不可扣抵統編紅底 */}
+                      {/* 【修正點 2】編輯畫面中，不可扣抵統編紅底 */}
                       <p className={`text-sm font-semibold ${isSellerIdNonDeductible(editingInvoice.sellerId) ? 'seller-id-non-deductible' : ''}`}>
                           {editingInvoice.sellerId}
                       </p>
@@ -1364,7 +1365,7 @@
                     <label className="block text-xs font-medium text-gray-700 mb-2">商品明細</label>
                     <div className="space-y-1 max-h-32 overflow-y-auto">
                       {(editingInvoice.consolidatedItems||[]).map((item, i)=>{
-                        {/* 明細顏色仍按照原先的規則：紅底、灰底、黃底 */}
+                        {/* 【修正點 1】明細顏色完全依賴自身的 Item-level 規則 */}
                         const isTempPassed = item.consolidatedIsPass || (
                             tempPassKeywords[editingInvoice.invoiceNumber] &&
                             tempPassKeywords[editingInvoice.invoiceNumber].some(rule => item.name.includes(rule.keyword))
