@@ -969,22 +969,17 @@
 
       // 計算 Step 5 明細項目的背景色
       const getStep5ItemBgClass = (inv, item) => {
-        const isNonDeductible = inv.buyerNote === '不得抵扣之進貨及費用';
-        const isDeductible = inv.buyerNote === '';
-        
-        const hasPassMatch = item.consolidatedIsPass; 
+        // Step 5 明細顏色與 getItemBgClass 保持一致
+        const hasNoMatch = item.consolidatedIsNo;
+        const hasNoRefMatch = item.consolidatedIsNoRefMatch;
+        const hasPassMatch = item.consolidatedIsPass;
 
-        if (isDeductible || isNonDeductible) {
-            const hasNoMatch = item.consolidatedIsNo;
-            const hasNoRefMatch = item.consolidatedIsNoRefMatch;
-
-            if (hasNoMatch) {
-                return 'bg-custom-red';
-            } else if (hasPassMatch) {
-                return 'isPassStyles'; 
-            } else if (hasNoRefMatch) {
-                 return 'bg-custom-yellow';
-            }
+        if (hasNoMatch) {
+            return 'bg-custom-red';
+        } else if (hasPassMatch) {
+            return 'isPassStyles';
+        } else if (hasNoRefMatch) {
+             return 'bg-custom-yellow';
         }
         
         return 'bg-gray-50'; 
@@ -1151,7 +1146,7 @@
                   <div className="mb-3">
                     <label className="block text-xs font-medium text-gray-700 mb-2">發票商品明細</label>
                     <div className="space-y-2 overflow-y-auto bg-gray-50 rounded p-2" style={{height:'240px'}}>
-                      {/* 明細項目顯示邏輯 */}
+                      {/* 明細項目顯示邏輯：顏色仍依明細規則判斷 */}
                       {pendingReviews[currentReviewIndex].consolidatedItems?.map((item, idx) => {
                         
                         const isTempPassed = item.consolidatedIsPass || (
@@ -1239,6 +1234,7 @@
                             </span>
                             <span className="text-sm font-semibold text-gray-900">{inv.invoiceNumber}</span>
                             <span className="text-xs text-gray-500">
+                                {/* 僅在統編上套用紅底樣式 */}
                                 <span className={isNonDeductibleSellerId ? 'seller-id-non-deductible' : ''}>
                                     {inv.sellerId}
                                 </span> - {inv.sellerName}
@@ -1251,6 +1247,7 @@
                           <h4 className="text-xs font-medium text-gray-700 mb-1">商品明細：</h4>
                           <div className="space-y-1">
                             {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.map((item, i)=>{
+                                {/* 明細顏色仍按照原先的規則：紅底、灰底、黃底 */}
                                 const bgColorClass = getStep5ItemBgClass(inv, item);
                                 const passTextColorClass = getPassTextColorClass(item);
 
@@ -1367,6 +1364,7 @@
                     <label className="block text-xs font-medium text-gray-700 mb-2">商品明細</label>
                     <div className="space-y-1 max-h-32 overflow-y-auto">
                       {(editingInvoice.consolidatedItems||[]).map((item, i)=>{
+                        {/* 明細顏色仍按照原先的規則：紅底、灰底、黃底 */}
                         const isTempPassed = item.consolidatedIsPass || (
                             tempPassKeywords[editingInvoice.invoiceNumber] &&
                             tempPassKeywords[editingInvoice.invoiceNumber].some(rule => item.name.includes(rule.keyword))
