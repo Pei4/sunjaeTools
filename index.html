@@ -983,6 +983,7 @@
              return 'bg-custom-yellow';
         }
         
+        // 處理 Step 5 列表的預設底色 (相比 Step 4/Edit Modal 的 'bg-white')
         return 'bg-gray-50'; 
       };
 
@@ -1235,7 +1236,7 @@
                             </span>
                             <span className="text-sm font-semibold text-gray-900">{inv.invoiceNumber}</span>
                             <span className="text-xs text-gray-500">
-                                {/* 【修正點 2】僅在統編上套用紅底樣式，與發票狀態無關 */}
+                                {/* 【修正點 2】僅在統編上套用紅底樣式，獨立判斷 */}
                                 <span className={isNonDeductibleSellerId ? 'seller-id-non-deductible' : ''}>
                                     {inv.sellerId}
                                 </span> - {inv.sellerName}
