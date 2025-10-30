@@ -371,11 +371,11 @@
           const sellerMatch = rs && rs === itemSellerId;
           const keywordMatch = rk && itemName.includes(rk);
           
-          // 檢查純統編匹配（此處 rs 存在且 rk 不存在）
+          // 純統編匹配的規則 (rs 存在且 rk 不存在)
           const sellerOnlyMatch = rs && !rk && sellerMatch;
           
           if (rs && rk) return sellerMatch && keywordMatch;
-          if (rs && !rk) return sellerOnlyMatch; // 純統編匹配
+          if (rs && !rk) return false; // 【修正點】純統編規則不應使明細變成 isYes
           if (!rs && rk) return keywordMatch;
           return false;
         });
@@ -387,12 +387,12 @@
           const sellerMatch = rs && rs === itemSellerId;
           const keywordMatch = rk && itemName.includes(rk);
           
-          // 檢查純統編匹配
+          // 純統編匹配的規則 (rs 存在且 rk 不存在)
           const sellerOnlyMatch = rs && !rk && sellerMatch;
 
-          // 不可扣抵的邏輯為：統編匹配 **或** 關鍵字匹配（或兩者皆無但有其中一項）
+          // 【修正點】純統編規則不應使明細變成 isNo
           if (rs && rk) return sellerMatch || keywordMatch;
-          if (rs && !rk) return sellerOnlyMatch; // 純統編匹配
+          if (rs && !rk) return false; 
           if (!rs && rk) return keywordMatch;
           return false;
         });
@@ -405,12 +405,12 @@
                 const sellerMatch = rs && rs === itemSellerId;
                 const keywordMatch = rk && itemName.includes(rk);
                 
-                // 檢查純統編匹配
+                // 純統編匹配的規則 (rs 存在且 rk 不存在)
                 const sellerOnlyMatch = rs && !rk && sellerMatch;
 
-                // Pass 的邏輯為：統編匹配 **或** 關鍵字匹配
+                // 【修正點】純統編規則不應使明細變成 isPass
                 if (rs && rk) return sellerMatch || keywordMatch;
-                if (rs && !rk) return sellerOnlyMatch; // 純統編匹配
+                if (rs && !rk) return false; 
                 if (!rs && rk) return keywordMatch;
                 return false;
             });
@@ -495,7 +495,7 @@
                   .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
                   .filter(it => it.name);
                 
-                // 計算每個明細的符合狀態
+                // 計算每個明細的【明細】符合狀態 (不包含純統編規則的影響)
                 const itemStatuses = rawItems.map(item => checkItemMatch(item, inv.sellerId, useRef));
 
                 // 將狀態合併回明細項目中
@@ -508,6 +508,10 @@
                 const totalItems = itemsWithStatus.length;
                 const matchNoItems  = itemsWithStatus.filter(s => s.isNo).length;            
                 const noMatchItems  = itemsWithStatus.filter(s => !s.isYes && !s.isNo && !s.isPass).length; 
+                
+                // 檢查是否有純賣方統編的「不可扣抵」規則
+                const isSellerIdNoRule = useRef.some(r => r.sellerId === inv.sellerId && r.deductable === 'No' && !r.keyword);
+
 
                 // *********** 發票自動審核邏輯 (根據新要求調整) ***********
                 let buyerNote = '待查';
@@ -515,13 +519,16 @@
                 if (totalItems === 0) {
                    buyerNote = '待查';
                 } else if (matchNoItems > 0) {
-                    // 1. 若有任一筆明細為不可扣抵，則該張發票註記為不可扣抵
+                    // 1. 若有任一筆明細為不可扣抵，則該張發票註記為不可扣抵 (明細優先)
                     buyerNote = '不得抵扣之進貨及費用'; 
+                } else if (isSellerIdNoRule) {
+                    // 2. 若明細無不可扣抵，但賣方統編有不可扣抵規則
+                    buyerNote = '不得抵扣之進貨及費用';
                 } else if (noMatchItems === 0) {
-                    // 2. 若所有發票明細皆為可扣抵或略過，則註記為可扣抵
+                    // 3. 若所有發票明細皆為可扣抵或略過，則註記為可扣抵
                     buyerNote = ''; 
                 } else { 
-                    // 3. 其餘不符上述條件，則繼續 Step 4 人工審核
+                    // 4. 其餘不符上述條件，則繼續 Step 4 人工審核
                     buyerNote = '待查';
                 }
                 // **********************************
@@ -548,7 +555,7 @@
       // 移除內部的 reprocessPendingInvoices 呼叫
       const addKeywordsToRefData = (keywords, deductable, sellerId) => {
         const list = (keywords||'').split(/[,，]/).map(s=>s.trim()).filter(Boolean);
-        // 【優化點 2】針對純統編判斷的處理：如果 keywords 為空但 sellerId 存在，則新增一筆純統編規則
+        // 針對純統編判斷的處理：如果 keywords 為空但 sellerId 存在，則新增一筆純統編規則
         const newRefs = list.length > 0 
           ? list.map(keyword => ({ customerId: companyId, deductable, sellerId: sellerId||'', keyword }))
           : (sellerId ? [{ customerId: companyId, deductable, sellerId, keyword: '' }] : []);
@@ -573,7 +580,7 @@
             .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
             .filter(it => it.name);
 
-          // 計算明細狀態：使用當前最新的規則列表
+          // 計算明細狀態：使用當前最新的規則列表 (不包含純統編規則的影響)
           const itemStatuses = rawItems.map(item => checkItemMatch(item, inv.sellerId, currentRefData));
 
           const totalItems = itemStatuses.length;
@@ -585,19 +592,26 @@
 
           const matchNoItems  = itemsWithStatus.filter(s => s.isNo).length;
           const noMatchItems  = itemsWithStatus.filter(s => !s.isYes && !s.isNo && !s.isPass).length;
+          
+          // 檢查是否有純賣方統編的「不可扣抵」規則
+          const isSellerIdNoRule = currentRefData.some(r => r.sellerId === inv.sellerId && r.deductable === 'No' && !r.keyword);
+
 
           // *********** 發票自動審核邏輯 (應用最終規則) ***********
           let buyerNote = '待查';
           if (totalItems === 0) {
              buyerNote = '待查';
           } else if (matchNoItems > 0) {
-              // 1. 若有任一筆明細為不可扣抵，則該張發票註記為不可扣抵
+              // 1. 若有任一筆明細為不可扣抵，則該張發票註記為不可扣抵 (明細優先)
+              buyerNote = '不得抵扣之進貨及費用';
+          } else if (isSellerIdNoRule) {
+              // 2. 若明細無不可扣抵，但賣方統編有不可扣抵規則
               buyerNote = '不得抵扣之進貨及費用';
           } else if (noMatchItems === 0) {
-              // 2. 若所有發票明細皆為可扣抵或略過，則註記為可扣抵
+              // 3. 若所有發票明細皆為可扣抵或略過，則註記為可扣抵
               buyerNote = '';
           } else { 
-              // 3. 其餘不符上述條件，則繼續 Step 4 人工審核
+              // 4. 其餘不符上述條件，則繼續 Step 4 人工審核
               buyerNote = '待查';
           }
           // **********************************
@@ -850,6 +864,7 @@
                     .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
                     .filter(it => it.name);
 
+                // 重新檢查明細匹配，確保明細狀態（isNo, isYes, isPass）不受純統編規則影響
                 const itemsWithStatus = rawItems.map(item => ({...item, ...checkItemMatch(item, inv.sellerId, updatedRefData)}));
                 const consolidatedItemsWithStatus = consolidateItems(itemsWithStatus);
 
@@ -959,38 +974,38 @@
 
         // 獨立判斷邏輯：只看明細自身的 Yes/No/Pass 狀態
         if (hasNoMatch) {
-            return 'bg-custom-red'; 
+            return 'bg-custom-red'; // 3. 明細項目為不可扣抵時，該明細應顯示紅底
         } else if (hasPassMatch) {
-            return 'isPassStyles'; 
+            return 'isPassStyles'; // 4. 明細項目為略過時，該明細應顯示深灰底
         } else if (hasNoRefMatch) {
-            return 'bg-custom-yellow'; 
+            return 'bg-custom-yellow'; // 5. 明細項目不符合任何規則時，該明細應顯示黃底
         }
         return 'bg-white';
       };
 
       // 計算 Step 5 明細項目的背景色
       const getStep5ItemBgClass = (inv, item) => {
-        // 【修正點 1】Step 5 明細顏色與 getItemBgClass 保持一致，不再受 inv.buyerNote 影響
+        // Step 5 明細顏色與 getItemBgClass 保持一致
         const hasNoMatch = item.consolidatedIsNo;
         const hasNoRefMatch = item.consolidatedIsNoRefMatch;
         const hasPassMatch = item.consolidatedIsPass;
 
         if (hasNoMatch) {
-            return 'bg-custom-red';
+            return 'bg-custom-red'; // 3. 明細項目為不可扣抵時，該明細應顯示紅底
         } else if (hasPassMatch) {
-            return 'isPassStyles';
+            return 'isPassStyles'; // 4. 明細項目為略過時，該明細應顯示深灰底
         } else if (hasNoRefMatch) {
-             return 'bg-custom-yellow';
+             return 'bg-custom-yellow'; // 5. 明細項目不符合任何規則時，該明細應顯示黃底
         }
         
-        // 處理 Step 5 列表的預設底色 (相比 Step 4/Edit Modal 的 'bg-white')
+        // 處理 Step 5 列表的預設底色 (非待查，且無特殊明細規則匹配時)
         return 'bg-gray-50'; 
       };
 
       // 判斷賣方統編是否被標記為「不可扣抵」
       const isSellerIdNonDeductible = (sellerId) => {
           if (!sellerId) return false;
-          // 【修正點 2】純粹檢查 refData 中是否有該統編的「不可扣抵」規則 (keyword 為空)
+          // 檢查 refData 中是否有純統編匹配的 'No' 規則
           return refData.some(r => r.deductable === 'No' && r.sellerId === sellerId.trim() && !r.keyword);
       };
 
@@ -1220,11 +1235,12 @@
                     const d = inv.buyerNote === '';
                     const nd = inv.buyerNote === '不得抵扣之進貨及費用';
                     
+                    // 1. 僅有發票狀態為不可扣抵的發票，需在 Step 5 列表顯示以下底色 (已修正為僅依明細判斷)
                     let statusText = '待查';
                     if (d) statusText = '可扣抵';
                     else if (nd) statusText = '不可扣抵';
                     
-                    // 賣方統編底色判斷
+                    // 2. 賣方統編為不可扣抵時，買方統編需顯示紅底
                     const isNonDeductibleSellerId = isSellerIdNonDeductible(inv.sellerId);
 
                     return (
@@ -1249,7 +1265,7 @@
                           <h4 className="text-xs font-medium text-gray-700 mb-1">商品明細：</h4>
                           <div className="space-y-1">
                             {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.map((item, i)=>{
-                                {/* 【修正點 1】明細顏色完全依賴自身的 Item-level 規則 */}
+                                {/* 【修正點 3, 4, 5】明細顏色完全依賴自身的 Item-level 規則 */}
                                 const bgColorClass = getStep5ItemBgClass(inv, item);
                                 const passTextColorClass = getPassTextColorClass(item);
 
@@ -1366,7 +1382,7 @@
                     <label className="block text-xs font-medium text-gray-700 mb-2">商品明細</label>
                     <div className="space-y-1 max-h-32 overflow-y-auto">
                       {(editingInvoice.consolidatedItems||[]).map((item, i)=>{
-                        {/* 【修正點 1】明細顏色完全依賴自身的 Item-level 規則 */}
+                        {/* 【修正點 3, 4, 5】明細顏色完全依賴自身的 Item-level 規則 */}
                         const isTempPassed = item.consolidatedIsPass || (
                             tempPassKeywords[editingInvoice.invoiceNumber] &&
                             tempPassKeywords[editingInvoice.invoiceNumber].some(rule => item.name.includes(rule.keyword))
