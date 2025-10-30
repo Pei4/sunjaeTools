@@ -375,7 +375,7 @@
           const sellerOnlyMatch = rs && !rk && sellerMatch;
           
           if (rs && rk) return sellerMatch && keywordMatch;
-          if (rs && !rk) return false; // 【修正點】純統編規則不應使明細變成 isYes
+          if (rs && !rk) return false; // 【修正：純統編規則不應影響明細 isYes 狀態】
           if (!rs && rk) return keywordMatch;
           return false;
         });
@@ -390,7 +390,7 @@
           // 純統編匹配的規則 (rs 存在且 rk 不存在)
           const sellerOnlyMatch = rs && !rk && sellerMatch;
 
-          // 【修正點】純統編規則不應使明細變成 isNo
+          // 【修正：純統編規則不應影響明細 isNo 狀態】
           if (rs && rk) return sellerMatch || keywordMatch;
           if (rs && !rk) return false; 
           if (!rs && rk) return keywordMatch;
@@ -408,7 +408,7 @@
                 // 純統編匹配的規則 (rs 存在且 rk 不存在)
                 const sellerOnlyMatch = rs && !rk && sellerMatch;
 
-                // 【修正點】純統編規則不應使明細變成 isPass
+                // 【修正：純統編規則不應影響明細 isPass 狀態】
                 if (rs && rk) return sellerMatch || keywordMatch;
                 if (rs && !rk) return false; 
                 if (!rs && rk) return keywordMatch;
@@ -665,9 +665,12 @@
           const keywords = isSellerIdOnlyRule ? '' : newKeyword;
           
           const addedRefs = addKeywordsToRefData(keywords, deductable, sellerId); 
+          
+          // 【修正：狀態重置】
           setNewKeyword(''); 
           setIncludeSellerID(false);
           setUseSellerIdOnly(false); // 重設狀態
+          
           newRefs.push(...addedRefs);
         } 
         
@@ -698,12 +701,13 @@
         setInvoiceData(updated);
 
         // 步驟 3: 若有新增規則 (Yes/No/Pass)，則觸發重新判斷和跳轉
-        if (newRefs.length > 0) {
-          // 將所有新規則添加到當前參考資料列表，再進行重新判斷
-          const updatedRefData = [...refData, ...newRefs];
+        // 【修正：強制觸發 reprocessPendingInvoices 以更新 pendingReviews 列表並跳轉】
+        if (newRefs.length > 0 || newBuyerNote !== '待查') {
+          // 如果有新增規則，使用更新後的 refData；否則使用當前的 refData
+          const updatedRefData = newRefs.length > 0 ? [...refData, ...newRefs] : refData;
           reprocessPendingInvoices(updatedRefData); 
         } else {
-            // 步驟 4: 若無新增關鍵字，手動更新 pendingReviews 並跳轉/結束 (原邏輯不變)
+            // 步驟 4: 若無新增關鍵字且手動標記為待查（理論上不應發生），執行原邏輯
             const allReviewedData = updated.filter(i => i.buyerNote === '待查');
             
             if (!allReviewedData.length) {
@@ -825,6 +829,12 @@
           const keywords = isSellerIdOnlyRule ? '' : newKeyword;
 
           const addedRefs = addKeywordsToRefData(keywords, deductable, sellerId);
+          
+          // 【修正：狀態重置】
+          setNewKeyword(''); 
+          setEditIncludeSellerID(false); 
+          setEditUseSellerIdOnly(false);
+          
           newRefs.push(...addedRefs);
         } 
         
@@ -853,8 +863,9 @@
         );
         
         // 步驟 3: 若有新增規則，需要重新計算該發票的明細狀態
-        if (newRefs.length > 0) {
-            const updatedRefData = [...refData, ...newRefs];
+        // 【修正：只要有新增規則 OR 更改了 buyerNote，就更新發票列表和 pendingReviews】
+        if (newRefs.length > 0 || currentInv.buyerNote !== newBuyerNote) {
+            const updatedRefData = newRefs.length > 0 ? [...refData, ...newRefs] : refData;
             const currentInvoiceIndex = updatedInvoiceData.findIndex(inv => inv.invoiceNumber === currentInv.invoiceNumber);
 
             if (currentInvoiceIndex !== -1) {
@@ -870,28 +881,18 @@
 
                 updatedInvoiceData[currentInvoiceIndex] = { 
                     ...inv, 
-                    buyerNote: newBuyerNote, // 再次確保手動決策覆蓋自動判斷
+                    buyerNote: newBuyerNote, // 確保手動決策覆蓋自動判斷
                     items: itemsWithStatus, 
                     consolidatedItems: consolidatedItemsWithStatus 
                 };
             }
-        } else {
-             // 如果沒有新增關鍵字，但手動更改了 buyerNote
-             const currentInvoiceIndex = updatedInvoiceData.findIndex(inv => inv.invoiceNumber === currentInv.invoiceNumber);
-             if (currentInvoiceIndex !== -1) {
-                const inv = updatedInvoiceData[currentInvoiceIndex];
-                updatedInvoiceData[currentInvoiceIndex] = { 
-                    ...inv, 
-                    buyerNote: newBuyerNote,
-                };
-             }
+            
+            setInvoiceData(updatedInvoiceData);
+            
+            // 更新 pendingReviews 列表
+            const stillPending = updatedInvoiceData.filter(i => i.buyerNote === '待查');
+            setPendingReviews(stillPending);
         }
-        
-        setInvoiceData(updatedInvoiceData);
-        
-        // 更新 pendingReviews 列表
-        const stillPending = updatedInvoiceData.filter(i => i.buyerNote === '待查');
-        setPendingReviews(stillPending);
 
         closeEditModal();
       };
@@ -974,11 +975,11 @@
 
         // 獨立判斷邏輯：只看明細自身的 Yes/No/Pass 狀態
         if (hasNoMatch) {
-            return 'bg-custom-red'; // 3. 明細項目為不可扣抵時，該明細應顯示紅底
+            return 'bg-custom-red'; 
         } else if (hasPassMatch) {
-            return 'isPassStyles'; // 4. 明細項目為略過時，該明細應顯示深灰底
+            return 'isPassStyles'; 
         } else if (hasNoRefMatch) {
-            return 'bg-custom-yellow'; // 5. 明細項目不符合任何規則時，該明細應顯示黃底
+            return 'bg-custom-yellow'; 
         }
         return 'bg-white';
       };
@@ -991,11 +992,11 @@
         const hasPassMatch = item.consolidatedIsPass;
 
         if (hasNoMatch) {
-            return 'bg-custom-red'; // 3. 明細項目為不可扣抵時，該明細應顯示紅底
+            return 'bg-custom-red';
         } else if (hasPassMatch) {
-            return 'isPassStyles'; // 4. 明細項目為略過時，該明細應顯示深灰底
+            return 'isPassStyles';
         } else if (hasNoRefMatch) {
-             return 'bg-custom-yellow'; // 5. 明細項目不符合任何規則時，該明細應顯示黃底
+             return 'bg-custom-yellow';
         }
         
         // 處理 Step 5 列表的預設底色 (非待查，且無特殊明細規則匹配時)
