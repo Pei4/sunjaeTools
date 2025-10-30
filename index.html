@@ -434,7 +434,7 @@
             if (fetched) { setFixedRefData(fetched); setN8nGetStatus('ok'); }
             else { setN8nGetStatus('fail'); setInfo(''); }
           } catch (e) {
-            setN8nGetStatus('fail'); setInfo('');
+            setN8nGetStatus('fail'); 이론에('');
           }
         } else {
           setN8nGetStatus('skip'); setInfo('');
@@ -657,41 +657,46 @@
         let currentRefData = refData;
         const newRefs = [];
 
-        // 步驟 1: 處理關鍵字新增 (Yes 或 No) / 純統編新增
-        if (isKeywordAdded || isSellerIdOnlyRule) {
-          const sellerId = isSellerIdOnlyRule || includeSellerID ? current.sellerId : '';
-          const deductable = decision === 'deductible' ? 'Yes' : 'No';
-          // 如果是純統編規則，keywords 傳遞空字串
-          const keywords = isSellerIdOnlyRule ? '' : newKeyword;
+        // 檢查是否處於「新增條件模式」
+        const isAddingRule = isKeywordAdded || isSellerIdOnlyRule || isPassKeywordSet;
+
+        // 步驟 1: 處理關鍵字新增 (Yes 或 No) / 純統編新增 / Pass 規則
+        if (isAddingRule) {
           
-          const addedRefs = addKeywordsToRefData(keywords, deductable, sellerId); 
+          // 1.1 處理 Yes/No 關鍵字或統編規則
+          if (isKeywordAdded || isSellerIdOnlyRule) {
+            const sellerId = isSellerIdOnlyRule || includeSellerID ? current.sellerId : '';
+            const deductable = decision === 'deductible' ? 'Yes' : 'No';
+            const keywords = isSellerIdOnlyRule ? '' : newKeyword;
+            
+            const addedRefs = addKeywordsToRefData(keywords, deductable, sellerId); 
+            newRefs.push(...addedRefs);
+          } 
           
-          // 【修正：狀態重置】
+          // 1.2 處理 Pass 規則
+          if (isPassKeywordSet) {
+            const passRules = tempPassKeywords[current.invoiceNumber].map(({ keyword, sellerId }) => ({
+              customerId: companyId, deductable: 'Pass', sellerId, keyword
+            }));
+            
+            setNewlyAddedRefData(prev => [...prev, ...passRules]);
+            setRefData(prev => [...prev, ...passRules]);
+            newRefs.push(...passRules);
+            
+            // 清空當前發票的暫存 Pass 規則
+            setTempPassKeywords(prev => {
+              const newState = { ...prev };
+              delete newState[current.invoiceNumber];
+              return newState;
+            });
+          }
+
+          // 清空輸入欄位狀態
           setNewKeyword(''); 
           setIncludeSellerID(false);
-          setUseSellerIdOnly(false); // 重設狀態
-          
-          newRefs.push(...addedRefs);
-        } 
-        
-        // 步驟 1.5: 處理所有暫存的 Pass 規則 (合併到新增列表)
-        if (isPassKeywordSet) {
-          const passRules = tempPassKeywords[current.invoiceNumber].map(({ keyword, sellerId }) => ({
-            customerId: companyId, deductable: 'Pass', sellerId, keyword
-          }));
-          
-          setNewlyAddedRefData(prev => [...prev, ...passRules]);
-          setRefData(prev => [...prev, ...passRules]);
-          newRefs.push(...passRules);
-          
-          // 清空當前發票的暫存 Pass 規則
-          setTempPassKeywords(prev => {
-            const newState = { ...prev };
-            delete newState[current.invoiceNumber];
-            return newState;
-          });
+          setUseSellerIdOnly(false);
         }
-
+        
         // 步驟 2: 處理發票狀態更新 (手動標記優先於自動判斷)
         const updated = invoiceData.map(inv =>
           inv.invoiceNumber === current.invoiceNumber
@@ -700,34 +705,29 @@
         );
         setInvoiceData(updated);
 
-        // 步驟 3: 觸發重新判斷和跳轉
-        // 【修正：無論是否有新增規則，只要有決定，就應該進入重新處理/跳轉邏輯】
-        const updatedRefData = newRefs.length > 0 ? [...refData, ...newRefs] : refData;
-        
-        // 如果手動決定了結果（非 '待查'），則重新審核列表
-        if (newBuyerNote !== '待查') {
+        // 步驟 3: 執行模式流程
+        if (isAddingRule) {
+            // 【模式 2: 新增規則並審核】: 新增規則後，強制重新處理整個列表
+            const updatedRefData = [...refData, ...newRefs];
             reprocessPendingInvoices(updatedRefData); 
         } else {
-            // 如果是新增了規則但仍然是 '待查' (例如新增 Pass 規則)，也應該重新處理
-            if (newRefs.length > 0) {
-                 reprocessPendingInvoices(updatedRefData); 
+            // 【模式 1: 僅手動審核】: 不新增規則，直接跳轉到下一張待審核發票
+            
+            // 找出所有仍待審核的發票（當前發票已標記為新狀態，將被過濾掉）
+            const allReviewedData = updated.filter(i => i.buyerNote === '待查');
+            
+            if (!allReviewedData.length) {
+                setPendingReviews([]);
+                setStep(5);
+                setCurrentReviewIndex(0);
             } else {
-                 // 否則，手動更新 pendingReviews 並跳轉/結束 (原邏輯不變)
-                const allReviewedData = updated.filter(i => i.buyerNote === '待查');
-                
-                if (!allReviewedData.length) {
-                    setPendingReviews([]);
-                    setStep(5);
-                    setCurrentReviewIndex(0);
-                } else {
-                    setPendingReviews(allReviewedData);
-                    const nextIndex = currentReviewIndex; 
-                    if (nextIndex < allReviewedData.length) {
-                        setCurrentReviewIndex(nextIndex);
-                    } else {
-                        setCurrentReviewIndex(Math.max(0, allReviewedData.length - 1));
-                    }
+                setPendingReviews(allReviewedData);
+                // 由於當前發票被標記為非「待查」，所以索引直接維持或重設
+                let nextIndex = currentReviewIndex; 
+                if (nextIndex >= allReviewedData.length) {
+                    nextIndex = Math.max(0, allReviewedData.length - 1);
                 }
+                setCurrentReviewIndex(nextIndex);
             }
         }
       };
@@ -827,38 +827,42 @@
         let currentRefData = refData;
         const newRefs = [];
 
-        // 步驟 1: 處理關鍵字新增 (Yes 或 No) / 純統編新增
-        if (isKeywordAdded || isSellerIdOnlyRule) {
-          const sellerId = isSellerIdOnlyRule || editIncludeSellerID ? currentInv.sellerId : '';
-          const deductable = decision === 'deductible' ? 'Yes' : 'No';
-          // 如果是純統編規則，keywords 傳遞空字串
-          const keywords = isSellerIdOnlyRule ? '' : newKeyword;
+        // 檢查是否處於「新增條件模式」
+        const isAddingRule = isKeywordAdded || isSellerIdOnlyRule || isPassKeywordSet;
 
-          const addedRefs = addKeywordsToRefData(keywords, deductable, sellerId);
-          
-          // 【修正：狀態重置】
-          setNewKeyword(''); 
-          setEditIncludeSellerID(false); 
-          setEditUseSellerIdOnly(false);
-          
-          newRefs.push(...addedRefs);
-        } 
-        
-        // 步驟 1.5: 處理所有暫存的 Pass 規則
-        if (isPassKeywordSet) {
-          const passRules = tempPassKeywords[currentInv.invoiceNumber].map(({ keyword, sellerId }) => ({
-            customerId: companyId, deductable: 'Pass', sellerId, keyword
-          }));
-          
-          setNewlyAddedRefData(prev => [...prev, ...passRules]);
-          setRefData(prev => [...prev, ...passRules]);
-          newRefs.push(...passRules);
-          
-          setTempPassKeywords(prev => {
-            const newState = { ...prev };
-            delete newState[currentInv.invoiceNumber];
-            return newState;
-          });
+        // 步驟 1: 處理關鍵字新增 (Yes 或 No) / 純統編新增 / Pass 規則
+        if (isAddingRule) {
+            // 1.1 處理 Yes/No 關鍵字或統編規則
+            if (isKeywordAdded || isSellerIdOnlyRule) {
+                const sellerId = isSellerIdOnlyRule || editIncludeSellerID ? currentInv.sellerId : '';
+                const deductable = decision === 'deductible' ? 'Yes' : 'No';
+                const keywords = isSellerIdOnlyRule ? '' : newKeyword;
+
+                const addedRefs = addKeywordsToRefData(keywords, deductable, sellerId);
+                newRefs.push(...addedRefs);
+            } 
+            
+            // 1.2 處理 Pass 規則
+            if (isPassKeywordSet) {
+                const passRules = tempPassKeywords[currentInv.invoiceNumber].map(({ keyword, sellerId }) => ({
+                    customerId: companyId, deductable: 'Pass', sellerId, keyword
+                }));
+                
+                setNewlyAddedRefData(prev => [...prev, ...passRules]);
+                setRefData(prev => [...prev, ...passRules]);
+                newRefs.push(...passRules);
+                
+                setTempPassKeywords(prev => {
+                    const newState = { ...prev };
+                    delete newState[currentInv.invoiceNumber];
+                    return newState;
+                });
+            }
+
+            // 清空輸入欄位狀態
+            setNewKeyword(''); 
+            setEditIncludeSellerID(false); 
+            setEditUseSellerIdOnly(false);
         }
 
         // 步驟 2: 更新發票狀態
@@ -868,9 +872,10 @@
             : inv
         );
         
-        // 步驟 3: 若有新增規則或手動更改，則更新發票列表和 pendingReviews
-        if (newRefs.length > 0 || currentInv.buyerNote !== newBuyerNote) {
-            const updatedRefData = newRefs.length > 0 ? [...refData, ...newRefs] : refData;
+        // 步驟 3: 執行模式流程
+        if (isAddingRule) {
+            // 【模式 2: 新增規則並審核】: 新增規則後，強制重新處理當前發票並更新列表
+            const updatedRefData = [...refData, ...newRefs];
             const currentInvoiceIndex = updatedInvoiceData.findIndex(inv => inv.invoiceNumber === currentInv.invoiceNumber);
 
             if (currentInvoiceIndex !== -1) {
@@ -880,18 +885,25 @@
                     .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
                     .filter(it => it.name);
 
-                // 重新檢查明細匹配，確保明細狀態（isNo, isYes, isPass）不受純統編規則影響
                 const itemsWithStatus = rawItems.map(item => ({...item, ...checkItemMatch(item, inv.sellerId, updatedRefData)}));
                 const consolidatedItemsWithStatus = consolidateItems(itemsWithStatus);
 
                 updatedInvoiceData[currentInvoiceIndex] = { 
                     ...inv, 
-                    buyerNote: newBuyerNote, // 確保手動決策覆蓋自動判斷
+                    buyerNote: newBuyerNote, 
                     items: itemsWithStatus, 
                     consolidatedItems: consolidatedItemsWithStatus 
                 };
             }
             
+            setInvoiceData(updatedInvoiceData);
+            
+            // 更新 pendingReviews 列表
+            const stillPending = updatedInvoiceData.filter(i => i.buyerNote === '待查');
+            setPendingReviews(stillPending);
+        } else {
+            // 【模式 1: 僅手動審核】: 只更新當前發票狀態
+            // 由於 Edit Modal 已經直接更新了 `updatedInvoiceData` 的 `buyerNote`，這裡只需設置回去。
             setInvoiceData(updatedInvoiceData);
             
             // 更新 pendingReviews 列表
