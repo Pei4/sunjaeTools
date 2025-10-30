@@ -651,7 +651,7 @@
         const isKeywordAdded = newKeyword.trim();
         const isPassKeywordSet = tempPassKeywords[current.invoiceNumber] && tempPassKeywords[current.invoiceNumber].length > 0;
         
-        // 【優化點 2】判斷是否為純統編判斷
+        // 判斷是否為純統編判斷
         const isSellerIdOnlyRule = useSellerIdOnly && !isKeywordAdded;
 
         let currentRefData = refData;
@@ -700,27 +700,33 @@
         );
         setInvoiceData(updated);
 
-        // 步驟 3: 若有新增規則 (Yes/No/Pass)，則觸發重新判斷和跳轉
-        // 【修正：強制觸發 reprocessPendingInvoices 以更新 pendingReviews 列表並跳轉】
-        if (newRefs.length > 0 || newBuyerNote !== '待查') {
-          // 如果有新增規則，使用更新後的 refData；否則使用當前的 refData
-          const updatedRefData = newRefs.length > 0 ? [...refData, ...newRefs] : refData;
-          reprocessPendingInvoices(updatedRefData); 
+        // 步驟 3: 觸發重新判斷和跳轉
+        // 【修正：無論是否有新增規則，只要有決定，就應該進入重新處理/跳轉邏輯】
+        const updatedRefData = newRefs.length > 0 ? [...refData, ...newRefs] : refData;
+        
+        // 如果手動決定了結果（非 '待查'），則重新審核列表
+        if (newBuyerNote !== '待查') {
+            reprocessPendingInvoices(updatedRefData); 
         } else {
-            // 步驟 4: 若無新增關鍵字且手動標記為待查（理論上不應發生），執行原邏輯
-            const allReviewedData = updated.filter(i => i.buyerNote === '待查');
-            
-            if (!allReviewedData.length) {
-                setPendingReviews([]);
-                setStep(5);
-                setCurrentReviewIndex(0);
+            // 如果是新增了規則但仍然是 '待查' (例如新增 Pass 規則)，也應該重新處理
+            if (newRefs.length > 0) {
+                 reprocessPendingInvoices(updatedRefData); 
             } else {
-                setPendingReviews(allReviewedData);
-                const nextIndex = currentReviewIndex; 
-                if (nextIndex < allReviewedData.length) {
-                    setCurrentReviewIndex(nextIndex);
+                 // 否則，手動更新 pendingReviews 並跳轉/結束 (原邏輯不變)
+                const allReviewedData = updated.filter(i => i.buyerNote === '待查');
+                
+                if (!allReviewedData.length) {
+                    setPendingReviews([]);
+                    setStep(5);
+                    setCurrentReviewIndex(0);
                 } else {
-                    setCurrentReviewIndex(Math.max(0, allReviewedData.length - 1));
+                    setPendingReviews(allReviewedData);
+                    const nextIndex = currentReviewIndex; 
+                    if (nextIndex < allReviewedData.length) {
+                        setCurrentReviewIndex(nextIndex);
+                    } else {
+                        setCurrentReviewIndex(Math.max(0, allReviewedData.length - 1));
+                    }
                 }
             }
         }
@@ -815,7 +821,7 @@
         const isKeywordAdded = newKeyword.trim();
         const isPassKeywordSet = tempPassKeywords[currentInv.invoiceNumber] && tempPassKeywords[currentInv.invoiceNumber].length > 0;
         
-        // 【優化點 2】判斷是否為純統編判斷
+        // 判斷是否為純統編判斷
         const isSellerIdOnlyRule = editUseSellerIdOnly && !isKeywordAdded;
 
         let currentRefData = refData;
@@ -862,8 +868,7 @@
             : inv
         );
         
-        // 步驟 3: 若有新增規則，需要重新計算該發票的明細狀態
-        // 【修正：只要有新增規則 OR 更改了 buyerNote，就更新發票列表和 pendingReviews】
+        // 步驟 3: 若有新增規則或手動更改，則更新發票列表和 pendingReviews
         if (newRefs.length > 0 || currentInv.buyerNote !== newBuyerNote) {
             const updatedRefData = newRefs.length > 0 ? [...refData, ...newRefs] : refData;
             const currentInvoiceIndex = updatedInvoiceData.findIndex(inv => inv.invoiceNumber === currentInv.invoiceNumber);
