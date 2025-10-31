@@ -1376,6 +1376,8 @@
               <div className="flex-1 overflow-y-auto">
                 <h2 className="text-lg font-bold mb-2">處理結果檢視</h2>
                 <p className="text-sm text-gray-600 mb-4">點擊任一筆記錄可重新審核或修改結果</p>
+                {/* 埋設 Log 檢查 isChecked 狀態 */}
+                <p style={{display:'none'}}>{console.log("Step 5 發票列表狀態:", invoiceData.map(inv => ({ invNo: inv.invoiceNumber, isChecked: inv.isChecked, buyerNote: inv.buyerNote })))}</p>
 
                 <div className="space-y-3 mb-4">
                   {invoiceData.map(inv => {
@@ -1395,12 +1397,12 @@
                           <div className="flex items-center gap-3">
                             <span className={`${d?'bg-green-100 text-green-800': nd?'bg-red-100 text-red-800':'bg-yellow-100 text-yellow-800'} inline-flex px-2 py-1 text-xs font-semibold rounded-full`}>
                               {statusText}
-                              {/* 顯示 isChecked 狀態 */}
-                              <span className="ml-1 text-gray-500">({inv.isChecked ? '已審' : '待審'})</span>
+                              {/* 【修正點 1】移除 isChecked 狀態顯示 (待審/已審) */}
+                              {/* <span className="ml-1 text-gray-500">({inv.isChecked ? '已審' : '待審'})</span> */}
                             </span>
                             <span className="text-sm font-semibold text-gray-900">{inv.invoiceNumber}</span>
                             <span className="text-xs text-gray-500">
-                                {/* 【修正點 2】Step 5 列表中，isCheck=0 才顯示統編底色 */}
+                                {/* Step 5 列表中，isCheck=0 才顯示統編底色 */}
                                 <span className={sellerIdBgClass}>
                                     {inv.sellerId}
                                 </span> - {inv.sellerName}
@@ -1413,7 +1415,7 @@
                           <h4 className="text-xs font-medium text-gray-700 mb-1">商品明細：</h4>
                           <div className="space-y-1">
                             {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.map((item, i)=>{
-                                {/* 【修正點 3, 4, 5】明細顏色判斷 (要求 6) */}
+                                {/* 明細顏色判斷 (isChecked=1 時為 bg-gray-50) */}
                                 const bgColorClass = getStep5ItemBgClass(inv, item);
                                 const passTextColorClass = getPassTextColorClass(item);
 
@@ -1514,7 +1516,7 @@
                               <label htmlFor="edit-use-seller-id-only" className="text-xs text-gray-700">直接使用賣方統編判斷</label>
                           </div>
                       </div>
-                      {/* 【修正點 2】編輯畫面中，統編底色一律顯示 (要求 7) */}
+                      {/* 編輯畫面中，統編底色一律顯示 (要求 7) */}
                       <p className={`text-sm font-semibold ${getSellerIdBgClass(editingInvoice.sellerId, refData)}`}>
                           {editingInvoice.sellerId}
                       </p>
@@ -1530,7 +1532,7 @@
                     <label className="block text-xs font-medium text-gray-700 mb-2">商品明細</label>
                     <div className="space-y-1 max-h-32 overflow-y-auto">
                       {(editingInvoice.consolidatedItems||[]).map((item, i)=>{
-                        {/* 【修正點 3, 4, 5】明細顏色完全依賴自身的 Item-level 規則 (要求 7) */}
+                        {/* 明細顏色完全依賴自身的 Item-level 規則 (要求 7) */}
                         const isTempPassed = item.consolidatedIsPass || (
                             tempPassKeywords[editingInvoice.invoiceNumber] &&
                             tempPassKeywords[editingInvoice.invoiceNumber].some(rule => item.name.includes(rule.keyword))
