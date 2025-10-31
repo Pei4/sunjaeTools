@@ -63,14 +63,6 @@
         border-radius: 4px;
     }
   </style>
-<script>
-  // --- Invoice helpers ---
-  function normalizeInvoiceNumber(v){
-    try {
-      return String(v||'').trim().replace(/\s+/g,'').toUpperCase();
-    } catch(e){ return v; }
-  }
-</script>
 </head>
 <body class="bg-gray-50">
   <div id="root"></div>
@@ -315,24 +307,7 @@
           }
           setOriginalInvoiceData(invoiceSheetData);
           setOriginalDetailsData(detailsSheetData);
-          (function(newArr){
-  const mapOld = new Map(invoiceData.map(x => [normalizeInvoiceNumber(x.invoiceNumber), x]));
-  const merged = newArr.map(obj => {
-    const key = normalizeInvoiceNumber(obj.invoiceNumber);
-    const prev = mapOld.get(key);
-    if(!prev){
-      console.debug('[Audit] merge MISS invoiceNumber (normalized)', { key, original: obj.invoiceNumber });
-    }
-    return {
-      ...(prev || {}),
-      ...obj,
-      invoiceNumber: key || obj.invoiceNumber,
-      isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((prev || {}).isChecked ?? 0),
-    };
-  });
-  console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
-  setInvoiceData(merged);
-})(invoiceSheetData);
+          setInvoiceData(invoiceSheetData);
           setInvoiceDetailsData(detailsSheetData);
           await searchRefData(id, invoiceSheetData, detailsSheetData);
         } catch (e) {
@@ -487,24 +462,7 @@
               .filter(it => it.name);
             return { ...inv, buyerNote:'待查', isChecked: 0, items:rawItems, consolidatedItems:consolidateItems(rawItems) };
           });
-          (function(newArr){
-  const mapOld = new Map(invoiceData.map(x => [normalizeInvoiceNumber(x.invoiceNumber), x]));
-  const merged = newArr.map(obj => {
-    const key = normalizeInvoiceNumber(obj.invoiceNumber);
-    const prev = mapOld.get(key);
-    if(!prev){
-      console.debug('[Audit] merge MISS invoiceNumber (normalized)', { key, original: obj.invoiceNumber });
-    }
-    return {
-      ...(prev || {}),
-      ...obj,
-      invoiceNumber: key || obj.invoiceNumber,
-      isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((prev || {}).isChecked ?? 0),
-    };
-  });
-  console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
-  setInvoiceData(merged);
-})(cleaned);
+          setInvoiceData(cleaned);
           setPendingReviews(cleaned);
           setStep(4);
           return;
@@ -519,24 +477,7 @@
               .filter(it => it.name);
             return { ...inv, buyerNote:'待查', isChecked: 0, items:rawItems, consolidatedItems:consolidateItems(rawItems) };
           });
-          (function(newArr){
-  const mapOld = new Map(invoiceData.map(x => [normalizeInvoiceNumber(x.invoiceNumber), x]));
-  const merged = newArr.map(obj => {
-    const key = normalizeInvoiceNumber(obj.invoiceNumber);
-    const prev = mapOld.get(key);
-    if(!prev){
-      console.debug('[Audit] merge MISS invoiceNumber (normalized)', { key, original: obj.invoiceNumber });
-    }
-    return {
-      ...(prev || {}),
-      ...obj,
-      invoiceNumber: key || obj.invoiceNumber,
-      isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((prev || {}).isChecked ?? 0),
-    };
-  });
-  console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
-  setInvoiceData(merged);
-})(cleaned);
+          setInvoiceData(cleaned);
           setPendingReviews(cleaned);
           setStep(4);
         } else {
@@ -630,24 +571,7 @@
                 };
               });
 
-              (function(newArr){
-  const mapOld = new Map(invoiceData.map(x => [normalizeInvoiceNumber(x.invoiceNumber), x]));
-  const merged = newArr.map(obj => {
-    const key = normalizeInvoiceNumber(obj.invoiceNumber);
-    const prev = mapOld.get(key);
-    if(!prev){
-      console.debug('[Audit] merge MISS invoiceNumber (normalized)', { key, original: obj.invoiceNumber });
-    }
-    return {
-      ...(prev || {}),
-      ...obj,
-      invoiceNumber: key || obj.invoiceNumber,
-      isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((prev || {}).isChecked ?? 0),
-    };
-  });
-  console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
-  setInvoiceData(merged);
-})(cleaned);
+              setInvoiceData(cleaned);
               // 篩選出所有 buyerNote='待查' 的發票進入人工審核 (isChecked=0 的待審發票)
               const pending = cleaned.filter(i => i.buyerNote === '待查');
               setPendingReviews(pending);
@@ -747,24 +671,7 @@
           };
         });
         
-        (function(newArr){
-  const mapOld = new Map(invoiceData.map(x => [normalizeInvoiceNumber(x.invoiceNumber), x]));
-  const merged = newArr.map(obj => {
-    const key = normalizeInvoiceNumber(obj.invoiceNumber);
-    const prev = mapOld.get(key);
-    if(!prev){
-      console.debug('[Audit] merge MISS invoiceNumber (normalized)', { key, original: obj.invoiceNumber });
-    }
-    return {
-      ...(prev || {}),
-      ...obj,
-      invoiceNumber: key || obj.invoiceNumber,
-      isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((prev || {}).isChecked ?? 0),
-    };
-  });
-  console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
-  setInvoiceData(merged);
-})(reprocessed);
+        setInvoiceData(reprocessed);
         
         const stillPending = reprocessed.filter(i => i.buyerNote === '待查');
         
@@ -840,27 +747,10 @@
         // 步驟 2: 處理發票狀態更新 (手動標記優先於自動判斷) & isChecked = 1 (要求 1)
         const updated = invoiceData.map(inv =>
           inv.invoiceNumber === current.invoiceNumber
-            ? { ...inv, invoiceNumber: normalizeInvoiceNumber(inv.invoiceNumber), buyerNote: newBuyerNote, isChecked: 1 } // 【核心修正點】手動點擊，強制 isChecked = 1
+            ? { ...inv, buyerNote: newBuyerNote, isChecked: 1 } // 【核心修正點】手動點擊，強制 isChecked = 1
             : inv
         );
-        (function(newArr){
-  const mapOld = new Map(invoiceData.map(x => [normalizeInvoiceNumber(x.invoiceNumber), x]));
-  const merged = newArr.map(obj => {
-    const key = normalizeInvoiceNumber(obj.invoiceNumber);
-    const prev = mapOld.get(key);
-    if(!prev){
-      console.debug('[Audit] merge MISS invoiceNumber (normalized)', { key, original: obj.invoiceNumber });
-    }
-    return {
-      ...(prev || {}),
-      ...obj,
-      invoiceNumber: key || obj.invoiceNumber,
-      isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((prev || {}).isChecked ?? 0),
-    };
-  });
-  console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
-  setInvoiceData(merged);
-})(updated);
+        setInvoiceData(updated);
 
         // 步驟 3: 執行模式流程
         if (isAddingRule) {
@@ -1025,7 +915,7 @@
         // 步驟 2: 更新發票狀態 & isChecked = 1 (手動編輯/確認完成，一律設為 1)
         let updatedInvoiceData = invoiceData.map(inv =>
           inv.invoiceNumber === currentInv.invoiceNumber
-            ? { ...inv, invoiceNumber: normalizeInvoiceNumber(inv.invoiceNumber), buyerNote: newBuyerNote, isChecked: 1 } 
+            ? { ...inv, buyerNote: newBuyerNote, isChecked: 1 } 
             : inv
         );
         
@@ -1101,48 +991,14 @@
                 return newInv;
             });
             
-            (function(newArr){
-  const mapOld = new Map(invoiceData.map(x => [normalizeInvoiceNumber(x.invoiceNumber), x]));
-  const merged = newArr.map(obj => {
-    const key = normalizeInvoiceNumber(obj.invoiceNumber);
-    const prev = mapOld.get(key);
-    if(!prev){
-      console.debug('[Audit] merge MISS invoiceNumber (normalized)', { key, original: obj.invoiceNumber });
-    }
-    return {
-      ...(prev || {}),
-      ...obj,
-      invoiceNumber: key || obj.invoiceNumber,
-      isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((prev || {}).isChecked ?? 0),
-    };
-  });
-  console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
-  setInvoiceData(merged);
-})(reprocessed);
+            setInvoiceData(reprocessed);
             
             // 更新 pendingReviews 列表
             const stillPending = reprocessed.filter(i => i.buyerNote === '待查');
             setPendingReviews(stillPending);
         } else {
             // 【模式 1: 僅手動審核】
-            (function(newArr){
-  const mapOld = new Map(invoiceData.map(x => [normalizeInvoiceNumber(x.invoiceNumber), x]));
-  const merged = newArr.map(obj => {
-    const key = normalizeInvoiceNumber(obj.invoiceNumber);
-    const prev = mapOld.get(key);
-    if(!prev){
-      console.debug('[Audit] merge MISS invoiceNumber (normalized)', { key, original: obj.invoiceNumber });
-    }
-    return {
-      ...(prev || {}),
-      ...obj,
-      invoiceNumber: key || obj.invoiceNumber,
-      isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((prev || {}).isChecked ?? 0),
-    };
-  });
-  console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
-  setInvoiceData(merged);
-})(updatedInvoiceData);
+            setInvoiceData(updatedInvoiceData);
             
             // 更新 pendingReviews 列表
             const stillPending = updatedInvoiceData.filter(i => i.buyerNote === '待查');
@@ -1623,24 +1479,7 @@
                   </button>
                   <button onClick={()=>{
                             setStep(1); setUploadedFile(null);
-                            (function(newArr){
-  const mapOld = new Map(invoiceData.map(x => [normalizeInvoiceNumber(x.invoiceNumber), x]));
-  const merged = newArr.map(obj => {
-    const key = normalizeInvoiceNumber(obj.invoiceNumber);
-    const prev = mapOld.get(key);
-    if(!prev){
-      console.debug('[Audit] merge MISS invoiceNumber (normalized)', { key, original: obj.invoiceNumber });
-    }
-    return {
-      ...(prev || {}),
-      ...obj,
-      invoiceNumber: key || obj.invoiceNumber,
-      isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((prev || {}).isChecked ?? 0),
-    };
-  });
-  console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
-  setInvoiceData(merged);
-})([]); setInvoiceDetailsData([]);
+                            setInvoiceData([]); setInvoiceDetailsData([]);
                             setOriginalInvoiceData([]); setOriginalDetailsData([]);
                             setPendingReviews([]); setCurrentReviewIndex(0);
                             setError(''); setNewlyAddedRefData([]);
