@@ -382,7 +382,7 @@
           const keywordMatch = rk && itemName.includes(rk);
           
           if (rs && rk) return sellerMatch && keywordMatch;
-          if (rs && !rk) return false; 
+          if (rs && !rk) return false; // 純統編規則不影響明細狀態
           if (!rs && rk) return keywordMatch;
           return false;
         });
@@ -395,7 +395,7 @@
           const keywordMatch = rk && itemName.includes(rk);
           
           if (rs && rk) return sellerMatch || keywordMatch;
-          if (rs && !rk) return false; 
+          if (rs && !rk) return false; // 純統編規則不影響明細狀態
           if (!rs && rk) return keywordMatch;
           return false;
         });
@@ -409,7 +409,7 @@
                 const keywordMatch = rk && itemName.includes(rk);
                 
                 if (rs && rk) return sellerMatch || keywordMatch;
-                if (rs && !rk) return false; 
+                if (rs && !rk) return false; // 純統編規則不影響明細狀態
                 if (!rs && rk) return keywordMatch;
                 return false;
             });
@@ -418,13 +418,13 @@
         return { isYes, isNo, isPass };
       };
 
-      // 【新增】判斷賣方統編是否為可扣抵賣方
+      // 【新增】判斷賣方統編是否為可扣抵賣方 (純統編規則)
       const isSellerIdDeductible = (sellerId, refData) => {
           if (!sellerId) return false;
           return refData.some(r => r.deductable === 'Yes' && r.sellerId === sellerId.trim() && !r.keyword);
       };
 
-      // 【修改】判斷賣方統編是否為不可扣抵賣方
+      // 【修改】判斷賣方統編是否為不可扣抵賣方 (純統編規則)
       const isSellerIdNonDeductible = (sellerId, refData) => {
           if (!sellerId) return false;
           return refData.some(r => r.deductable === 'No' && r.sellerId === sellerId.trim() && !r.keyword);
@@ -526,10 +526,10 @@
                 const isSellerIdNoRule  = isSellerIdNonDeductible(inv.sellerId, useRef);
                 const isSellerIdYesRule = isSellerIdDeductible(inv.sellerId, useRef);
 
-                // *********** 發票自動審核邏輯 (要求 1) ***********
+                // *********** 發票自動審核邏輯 (要求 1 - 匯入 Excel 階段) ***********
                 let buyerNote = '待查';
                 let isChecked = 0; // 預設待審核
-
+                
                 if (totalItems === 0) {
                    buyerNote = '待查';
                 } else if (matchNoItems > 0) {
@@ -572,7 +572,7 @@
               });
 
               setInvoiceData(cleaned);
-              // 篩選出所有 buyerNote='待查' 的發票進入人工審核
+              // 篩選出所有 buyerNote='待查' 的發票進入人工審核 (isChecked=0 的待審發票)
               const pending = cleaned.filter(i => i.buyerNote === '待查');
               setPendingReviews(pending);
               setStep(pending.length ? 4 : 5);
@@ -638,7 +638,6 @@
           } else if (matchNoItems > 0) {
               // 1. 若有任一筆明細為不可扣抵，則該張發票註記為不可扣抵 (明細優先)
               buyerNote = '不得抵扣之進貨及費用';
-              // 若所有品項都是不可扣則 isChecked = 1，否則 isChecked = 0
               if (matchNoItems === totalItems) {
                   isChecked = 1;
               } else {
@@ -745,10 +744,10 @@
           setUseSellerIdOnly(false);
         }
         
-        // 步驟 2: 處理發票狀態更新 (手動標記優先於自動判斷) & isChecked = 1 (要求 4)
+        // 步驟 2: 處理發票狀態更新 (手動標記優先於自動判斷) & isChecked = 1 (要求 1)
         const updated = invoiceData.map(inv =>
           inv.invoiceNumber === current.invoiceNumber
-            ? { ...inv, buyerNote: newBuyerNote, isChecked: 1 } // 設定 isChecked = 1
+            ? { ...inv, buyerNote: newBuyerNote, isChecked: 1 } // 設定 isChecked = 1 (要求 1)
             : inv
         );
         setInvoiceData(updated);
@@ -913,21 +912,20 @@
             setEditUseSellerIdOnly(false);
         }
 
-        // 步驟 2: 更新發票狀態 & isChecked = 1 (要求 4)
+        // 步驟 2: 更新發票狀態 & isChecked = 1
         let updatedInvoiceData = invoiceData.map(inv =>
           inv.invoiceNumber === currentInv.invoiceNumber
-            ? { ...inv, buyerNote: newBuyerNote, isChecked: 1 } // 設定 isChecked = 1
+            ? { ...inv, buyerNote: newBuyerNote, isChecked: 1 } 
             : inv
         );
         
-        // 步驟 3: 執行流程
+        // 步驟 3: 執行流程 (模式 2: 新增規則並審核)
         if (isAddingRule) {
-            // 【模式 2: 新增規則並審核】: 新增規則後，重新處理當前發票並檢查所有 isChecked=0 發票 (要求 8)
+            // 【模式 2: 新增規則並審核】: 重新檢查所有 isChecked=0 發票 (要求 2)
             const updatedRefData = [...refData, ...newRefs];
             
-            // 處理當前編輯中的發票
+            // 處理當前編輯中的發票（確保 Item 狀態更新）
             const currentInvoiceIndex = updatedInvoiceData.findIndex(inv => inv.invoiceNumber === currentInv.invoiceNumber);
-
             if (currentInvoiceIndex !== -1) {
                 const inv = updatedInvoiceData[currentInvoiceIndex];
                 const rawItems = invoiceDetailsData
@@ -935,51 +933,51 @@
                     .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
                     .filter(it => it.name);
 
-                // 重新檢查明細匹配
                 const itemsWithStatus = rawItems.map(item => ({...item, ...checkItemMatch(item, inv.sellerId, updatedRefData)}));
                 const consolidatedItemsWithStatus = consolidateItems(itemsWithStatus);
 
                 updatedInvoiceData[currentInvoiceIndex] = { 
                     ...inv, 
                     buyerNote: newBuyerNote, 
-                    isChecked: 1, // 確保手動決策覆蓋自動判斷
+                    isChecked: 1, 
                     items: itemsWithStatus, 
                     consolidatedItems: consolidatedItemsWithStatus 
                 };
             }
             
-            // 檢查所有 isChecked=0 的發票 (要求 8)
+            // 檢查所有 isChecked=0 的發票 (要求 2)
             const reprocessed = updatedInvoiceData.map(inv => {
-                if (inv.isChecked !== 0 || inv.buyerNote !== '待查') return inv;
+                // 只處理 isChecked=0 的發票
+                if (inv.isChecked !== 0) return inv;
 
                 const rawItems = invoiceDetailsData
                     .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
                     .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
                     .filter(it => it.name);
                 
-                // 重新檢查 Item 狀態
+                // 重新檢查 Item 狀態 (更新明細底色)
                 const itemStatuses = rawItems.map(item => checkItemMatch(item, inv.sellerId, updatedRefData));
                 const itemsWithStatus = rawItems.map((item, index) => ({...item, ...itemStatuses[index]}));
 
                 const matchNoItems  = itemsWithStatus.filter(s => s.isNo).length;
                 const noMatchItems  = itemsWithStatus.filter(s => !s.isYes && !s.isNo && !s.isPass).length;
-
-                // 若檢查後的明細皆為可扣/略過，則將 Checked 設定為 1
-                if (matchNoItems === 0 && noMatchItems === 0) {
-                    return { 
-                        ...inv, 
-                        buyerNote: '', 
-                        isChecked: 1, 
-                        items: itemsWithStatus, 
-                        consolidatedItems: consolidateItems(itemsWithStatus) 
-                    };
-                }
-                // 否則，僅更新 Item 狀態以便 Step 5 列表顯示正確顏色 (要求 2 的第二部分)
-                return { 
+                
+                let newInv = { 
                     ...inv, 
                     items: itemsWithStatus, 
                     consolidatedItems: consolidateItems(itemsWithStatus) 
                 };
+
+                // 若檢查後的明細皆為可扣/略過，則將 Checked 設定為 1 (要求 2 - 升級 Checked)
+                if (matchNoItems === 0 && noMatchItems === 0) {
+                    newInv.buyerNote = ''; // 符合自動可扣
+                    newInv.isChecked = 1; 
+                } else if (matchNoItems > 0) {
+                    newInv.buyerNote = '不得抵扣之進貨及費用';
+                }
+
+                // 即使發票狀態沒有升級，Item 狀態和 ConsolidatedItems 也要更新，以便 Step 5 列表顯示正確顏色
+                return newInv;
             });
             
             setInvoiceData(reprocessed);
@@ -987,9 +985,8 @@
             // 更新 pendingReviews 列表
             const stillPending = reprocessed.filter(i => i.buyerNote === '待查');
             setPendingReviews(stillPending);
-
         } else {
-            // 【模式 1: 僅手動審核】: 只更新當前發票狀態
+            // 【模式 1: 僅手動審核】
             setInvoiceData(updatedInvoiceData);
             
             // 更新 pendingReviews 列表
