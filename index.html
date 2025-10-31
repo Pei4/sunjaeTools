@@ -472,7 +472,16 @@
               .filter(it => it.name);
             return { ...inv, buyerNote:'待查', isChecked: 0, items:rawItems, consolidatedItems:consolidateItems(rawItems) };
           });
-          setInvoiceData(cleaned);
+          (function(newArr){
+  const mapOld = new Map(invoiceData.map(x => [x.invoiceNumber, x]));
+  const merged = newArr.map(obj => ({
+    ...(mapOld.get(obj.invoiceNumber) || {}),
+    ...obj,
+    isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((mapOld.get(obj.invoiceNumber) || {}).isChecked ?? 0),
+  }));
+  console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
+  setInvoiceData(merged);
+})(cleaned);
           setPendingReviews(cleaned);
           setStep(4);
           return;
@@ -487,7 +496,16 @@
               .filter(it => it.name);
             return { ...inv, buyerNote:'待查', isChecked: 0, items:rawItems, consolidatedItems:consolidateItems(rawItems) };
           });
-          setInvoiceData(cleaned);
+          (function(newArr){
+  const mapOld = new Map(invoiceData.map(x => [x.invoiceNumber, x]));
+  const merged = newArr.map(obj => ({
+    ...(mapOld.get(obj.invoiceNumber) || {}),
+    ...obj,
+    isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((mapOld.get(obj.invoiceNumber) || {}).isChecked ?? 0),
+  }));
+  console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
+  setInvoiceData(merged);
+})(cleaned);
           setPendingReviews(cleaned);
           setStep(4);
         } else {
@@ -581,7 +599,16 @@
                 };
               });
 
-              setInvoiceData(cleaned);
+              (function(newArr){
+  const mapOld = new Map(invoiceData.map(x => [x.invoiceNumber, x]));
+  const merged = newArr.map(obj => ({
+    ...(mapOld.get(obj.invoiceNumber) || {}),
+    ...obj,
+    isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((mapOld.get(obj.invoiceNumber) || {}).isChecked ?? 0),
+  }));
+  console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
+  setInvoiceData(merged);
+})(cleaned);
               // 篩選出所有 buyerNote='待查' 的發票進入人工審核 (isChecked=0 的待審發票)
               const pending = cleaned.filter(i => i.buyerNote === '待查');
               setPendingReviews(pending);
@@ -681,7 +708,16 @@
           };
         });
         
-        setInvoiceData(reprocessed);
+        (function(newArr){
+  const mapOld = new Map(invoiceData.map(x => [x.invoiceNumber, x]));
+  const merged = newArr.map(obj => ({
+    ...(mapOld.get(obj.invoiceNumber) || {}),
+    ...obj,
+    isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((mapOld.get(obj.invoiceNumber) || {}).isChecked ?? 0),
+  }));
+  console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
+  setInvoiceData(merged);
+})(reprocessed);
         
         const stillPending = reprocessed.filter(i => i.buyerNote === '待查');
         
@@ -761,7 +797,16 @@
             : inv
         );
         console.debug('[Audit] Step4.handleReviewDecision -> set isChecked=1', { invoiceNumber: current.invoiceNumber, buyerNote: newBuyerNote });
-        setInvoiceData(updated);
+        (function(newArr){
+  const mapOld = new Map(invoiceData.map(x => [x.invoiceNumber, x]));
+  const merged = newArr.map(obj => ({
+    ...(mapOld.get(obj.invoiceNumber) || {}),
+    ...obj,
+    isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((mapOld.get(obj.invoiceNumber) || {}).isChecked ?? 0),
+  }));
+  console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
+  setInvoiceData(merged);
+})(updated);
 
         // 步驟 3: 執行模式流程
         if (isAddingRule) {
@@ -1003,14 +1048,32 @@
                 return newInv;
             });
             
-            setInvoiceData(reprocessed);
+            (function(newArr){
+  const mapOld = new Map(invoiceData.map(x => [x.invoiceNumber, x]));
+  const merged = newArr.map(obj => ({
+    ...(mapOld.get(obj.invoiceNumber) || {}),
+    ...obj,
+    isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((mapOld.get(obj.invoiceNumber) || {}).isChecked ?? 0),
+  }));
+  console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
+  setInvoiceData(merged);
+})(reprocessed);
             
             // 更新 pendingReviews 列表
             const stillPending = reprocessed.filter(i => i.buyerNote === '待查');
             setPendingReviews(stillPending);
         } else {
             // 【模式 1: 僅手動審核】
-            setInvoiceData(updatedInvoiceData);
+            (function(newArr){
+  const mapOld = new Map(invoiceData.map(x => [x.invoiceNumber, x]));
+  const merged = newArr.map(obj => ({
+    ...(mapOld.get(obj.invoiceNumber) || {}),
+    ...obj,
+    isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((mapOld.get(obj.invoiceNumber) || {}).isChecked ?? 0),
+  }));
+  console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
+  setInvoiceData(merged);
+})(updatedInvoiceData);
             
             // 更新 pendingReviews 列表
             const stillPending = updatedInvoiceData.filter(i => i.buyerNote === '待查');
@@ -1490,7 +1553,16 @@
                   </button>
                   <button onClick={()=>{
                             setStep(1); setUploadedFile(null);
-                            setInvoiceData([]); setInvoiceDetailsData([]);
+                            (function(newArr){
+  const mapOld = new Map(invoiceData.map(x => [x.invoiceNumber, x]));
+  const merged = newArr.map(obj => ({
+    ...(mapOld.get(obj.invoiceNumber) || {}),
+    ...obj,
+    isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((mapOld.get(obj.invoiceNumber) || {}).isChecked ?? 0),
+  }));
+  console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
+  setInvoiceData(merged);
+})([]); setInvoiceDetailsData([]);
                             setOriginalInvoiceData([]); setOriginalDetailsData([]);
                             setPendingReviews([]); setCurrentReviewIndex(0);
                             setError(''); setNewlyAddedRefData([]);
