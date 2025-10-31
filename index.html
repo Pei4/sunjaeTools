@@ -238,8 +238,15 @@
         for(let i=0;i<items.length;i++){
           if(used.has(i)) continue;
           const cur=items[i]; const similarIdx=[i]; used.add(i);
+          
+          // 排除非審核項目 (如載具號碼、總備註)
+          if(cur.isAuxiliary) { 
+              res.push(cur); 
+              continue; 
+          }
+
           for(let j=i+1;j<items.length;j++){
-            if(used.has(j)) continue;
+            if(used.has(j) || items[j].isAuxiliary) continue;
             if(calculateSimilarity(cur.name,items[j].name)>=0.8){ similarIdx.push(j); used.add(j); }
           }
           let name = cur.name;
@@ -340,8 +347,10 @@
                 sellerName:    row[8] || '',
                 originalRow:   row,
                 rowIndex:      idx + 2,
-                // 【要求 1】新增 isChecked 欄位，預設為 0 (待審核)
                 isChecked:     0, 
+                // 【優化 1-1】讀取 U 欄 (20) 載具號碼2 和 V 欄 (21) 總備註
+                carrierNo2:    String(row[20] || '').trim(), 
+                totalNote:     String(row[21] || '').trim(),
               })).filter(x=>x.invoiceNumber);
               resolve(processed);
             } else {
@@ -352,6 +361,7 @@
                 originalRow:   row,
                 rowIndex:      idx + 2,
                 originalIndex: idx, // 紀錄原始明細的索引
+                isAuxiliary:   false, // 預設不是輔助項目
               })).filter(it => String(it.invoiceNumber||'').trim() && String(it.itemName||'').trim());
               resolve(processed);
             }
@@ -429,6 +439,30 @@
           if (!sellerId) return false;
           return refData.some(r => r.deductable === 'No' && r.sellerId === sellerId.trim() && !r.keyword);
       };
+
+      // 輔助函數：添加輔助明細行 (載具/備註)
+      const injectAuxiliaryItems = (rawItems, inv) => {
+          const items = [...rawItems];
+          // 【優化 2-1】若有載具號碼2，添加輔助項目
+          if (inv.carrierNo2) {
+              items.push({
+                  name: `載具號碼：${inv.carrierNo2}`,
+                  amount: 0,
+                  originalIndex: -1, // 標記為非原始明細
+                  isAuxiliary: true, // 標記為輔助項目
+              });
+          }
+          // 【優化 2-2】若有總備註，添加輔助項目
+          if (inv.totalNote) {
+              items.push({
+                  name: `總備註：${inv.totalNote}`,
+                  amount: 0,
+                  originalIndex: -2, // 標記為非原始明細
+                  isAuxiliary: true, // 標記為輔助項目
+              });
+          }
+          return items;
+      }
       
       const searchRefData = async (customerIdParam, invoicesArg, detailsArg) => {
         const cid = customerIdParam || companyId;
@@ -456,10 +490,14 @@
                             useList.some(r => !String(r.customerId || '').trim());
         if (anyCidEmpty) {
           const cleaned = invoices.map(inv => {
-            const rawItems = details
+            let rawItems = details
               .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
-              .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
+              .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex, isAuxiliary: d.isAuxiliary }))
               .filter(it => it.name);
+
+            // 注入輔助項目
+            rawItems = injectAuxiliaryItems(rawItems, inv);
+
             return { ...inv, buyerNote:'待查', isChecked: 0, items:rawItems, consolidatedItems:consolidateItems(rawItems) };
           });
           setInvoiceData(cleaned);
@@ -471,10 +509,14 @@
         const data = (useList || []).filter(r => r.customerId === cid);
         if (!data || data.length === 0) {
           const cleaned = invoices.map(inv => {
-            const rawItems = details
+            let rawItems = details
               .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
-              .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
+              .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex, isAuxiliary: d.isAuxiliary }))
               .filter(it => it.name);
+            
+            // 注入輔助項目
+            rawItems = injectAuxiliaryItems(rawItems, inv);
+
             return { ...inv, buyerNote:'待查', isChecked: 0, items:rawItems, consolidatedItems:consolidateItems(rawItems) };
           });
           setInvoiceData(cleaned);
@@ -501,26 +543,33 @@
             if (prev >= 100) {
               clearInterval(interval);
               const cleaned = invoiceData.map(inv => {
-                const rawItems = invoiceDetailsData
+                let rawItems = invoiceDetailsData
                   .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
-                  .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
+                  .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex, isAuxiliary: d.isAuxiliary }))
                   .filter(it => it.name);
                 
-                // 計算每個明細的【明細】符合狀態 (不包含純統編規則的影響)
-                const itemStatuses = rawItems.map(item => checkItemMatch(item, inv.sellerId, useRef));
+                // 注入輔助項目
+                rawItems = injectAuxiliaryItems(rawItems, inv);
+                
+                // 計算每個明細的【明細】符合狀態 (排除輔助項目)
+                const checkableItems = rawItems.filter(item => !item.isAuxiliary);
+                const itemStatuses = checkableItems.map(item => checkItemMatch(item, inv.sellerId, useRef));
 
                 // 將狀態合併回明細項目中
-                const itemsWithStatus = rawItems.map((item, index) => ({
-                    ...item,
-                    ...itemStatuses[index],
-                }));
+                let itemStatusIndex = 0;
+                const itemsWithStatus = rawItems.map((item) => {
+                    if (item.isAuxiliary) return item; // 輔助項目直接返回
+                    return {
+                        ...item,
+                        ...itemStatuses[itemStatusIndex++],
+                    };
+                });
 
-                // 統計數量
-                const totalItems = itemsWithStatus.length;
-                const matchNoItems  = itemsWithStatus.filter(s => s.isNo).length; // 不可扣項目數量
-                const matchYesItems = itemsWithStatus.filter(s => s.isYes).length; // 可扣項目數量
-                const matchPassItems = itemsWithStatus.filter(s => s.isPass).length; // 略過項目數量
-                const noMatchItems  = itemsWithStatus.filter(s => !s.isYes && !s.isNo && !s.isPass).length; // 黃底項目數量
+                // 統計數量 (只計算非輔助項目)
+                const totalItems = checkableItems.length;
+                const matchNoItems  = itemsWithStatus.filter(s => !s.isAuxiliary && s.isNo).length; 
+                const matchYesItems = itemsWithStatus.filter(s => !s.isAuxiliary && s.isYes).length;
+                const noMatchItems  = itemsWithStatus.filter(s => !s.isAuxiliary && !s.isYes && !s.isNo && !s.isPass).length;
                 
                 // 檢查是否有純賣方統編的可扣抵/不可扣抵規則
                 const isSellerIdNoRule  = isSellerIdNonDeductible(inv.sellerId, useRef);
@@ -622,23 +671,32 @@
           // 只處理 '待查' 且 isChecked=0 的發票
           if (inv.buyerNote !== '待查' || inv.isChecked !== 0) return inv;
           
-          const rawItems = invoiceDetailsData
+          let rawItems = invoiceDetailsData
             .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
-            .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
+            .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex, isAuxiliary: d.isAuxiliary }))
             .filter(it => it.name);
 
-          // 計算明細狀態：使用當前最新的規則列表 (不包含純統編規則的影響)
-          const itemStatuses = rawItems.map(item => checkItemMatch(item, inv.sellerId, currentRefData));
-
-          const totalItems = itemStatuses.length;
+          // 注入輔助項目
+          rawItems = injectAuxiliaryItems(rawItems, inv);
           
-          const itemsWithStatus = rawItems.map((item, index) => ({
-              ...item,
-              ...itemStatuses[index],
-          }));
+          // 計算每個明細的【明細】符合狀態 (排除輔助項目)
+          const checkableItems = rawItems.filter(item => !item.isAuxiliary);
+          const itemStatuses = checkableItems.map(item => checkItemMatch(item, inv.sellerId, currentRefData));
 
-          const matchNoItems  = itemsWithStatus.filter(s => s.isNo).length;
-          const noMatchItems  = itemsWithStatus.filter(s => !s.isYes && !s.isNo && !s.isPass).length;
+          // 將狀態合併回明細項目中
+          let itemStatusIndex = 0;
+          const itemsWithStatus = rawItems.map((item) => {
+              if (item.isAuxiliary) return item; // 輔助項目直接返回
+              return {
+                  ...item,
+                  ...itemStatuses[itemStatusIndex++],
+              };
+          });
+
+
+          const totalItems = checkableItems.length;
+          const matchNoItems  = itemsWithStatus.filter(s => !s.isAuxiliary && s.isNo).length;
+          const noMatchItems  = itemsWithStatus.filter(s => !s.isAuxiliary && !s.isYes && !s.isNo && !s.isPass).length;
           
           // 檢查是否有純賣方統編的不可扣抵規則
           const isSellerIdNoRule  = isSellerIdNonDeductible(inv.sellerId, currentRefData);
@@ -758,7 +816,7 @@
             // 【模式 2: 新增規則並審核】: 檢查其他待審發票
             const updatedRefData = [...refData, ...newRefs];
             
-            // 找出所有非當前發票且是待審核的列表
+            // 找出所有非當前發票的列表
             const otherInvoices = invoiceData.filter(inv => inv.invoiceNumber !== currentInvNo);
 
             // 對其他待審核發票進行重新審核 (使用最新的 RefData)
@@ -963,10 +1021,12 @@
             finalInvoiceData = invoiceData.map(inv => {
                 if (inv.invoiceNumber === currentInvNo) {
                     // 重新計算當前發票的明細狀態（為了顯示正確的明細顏色），但鎖定 isChecked 和 buyerNote
-                    const rawItems = invoiceDetailsData
+                    let rawItems = invoiceDetailsData
                         .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
-                        .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
+                        .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex, isAuxiliary: d.isAuxiliary }))
                         .filter(it => it.name);
+
+                    rawItems = injectAuxiliaryItems(rawItems, inv);
 
                     const itemsWithStatus = rawItems.map(item => ({...item, ...checkItemMatch(item, inv.sellerId, updatedRefData)}));
                     const consolidatedItemsWithStatus = consolidateItems(itemsWithStatus);
@@ -1040,11 +1100,14 @@
           setInfo('重送失敗。');
         }
       };
-
+      
+      // 【優化 3, 4, 5】調整下載邏輯以新增輔助明細列
       const downloadResults = async () => {
         try {
           if (!window.XLSX) throw new Error('XLSX 函式庫未可用');
           const wb = window.XLSX.utils.book_new();
+          
+          // 處理 Invoice 工作表 (不變)
           const updatedInvoiceRows = originalInvoiceData.map(inv => {
             const updated = invoiceData.find(x => x.invoiceNumber === inv.invoiceNumber);
             if (updated) {
@@ -1059,9 +1122,125 @@
           const ws1 = window.XLSX.utils.aoa_to_sheet([invoiceHeaders, ...updatedInvoiceRows]);
           window.XLSX.utils.book_append_sheet(wb, ws1, "Invoice");
 
+          // 處理 Invoice_details 工作表
           const detailsHeaders = ["發票號碼","發票日期","序號","品名","數量","單位","單價","金額","單一欄位備註","相關號碼"];
-          const detailsRows = originalDetailsData.map(d => d.originalRow);
-          const ws2 = window.XLSX.utils.aoa_to_sheet([detailsHeaders, ...detailsRows]);
+          const newDetailsRows = [];
+          
+          let lastInvoiceNumber = '';
+          let lastInvoiceDate = '';
+          let currentSequence = 0;
+
+          // 根據原始明細數據進行處理
+          originalDetailsData.forEach(d => {
+              const invoice = invoiceData.find(inv => inv.invoiceNumber === d.invoiceNumber);
+              
+              // 1. 處理原始明細行
+              const originalRow = [...d.originalRow];
+              // 確保發票號碼和日期被正確更新以便後續插入
+              if (originalRow[0]) lastInvoiceNumber = originalRow[0];
+              if (originalRow[1]) lastInvoiceDate = originalRow[1];
+              // 更新序號
+              currentSequence = originalRow[2] ? Number(originalRow[2]) : currentSequence + 1;
+              originalRow[2] = currentSequence; 
+              newDetailsRows.push(originalRow);
+
+              // 2. 檢查是否需要插入輔助明細 (只在該發票的明細結束時檢查一次)
+              const nextDetail = originalDetailsData.find(nextD => nextD.rowIndex > d.rowIndex && nextD.invoiceNumber === d.invoiceNumber);
+              
+              if (!nextDetail && invoice) {
+                  const auxiliaryRows = [];
+                  
+                  // 2.1 U 欄 (載具號碼2)
+                  if (invoice.carrierNo2) {
+                      currentSequence += 1; // 序號 +1
+                      auxiliaryRows.push([
+                          lastInvoiceNumber, // 發票號碼
+                          lastInvoiceDate,   // 發票日期
+                          currentSequence,   // 序號 (前一列 +1)
+                          `載具號碼：${invoice.carrierNo2}`, // 品名
+                          0, // 數量
+                          '',// 單位
+                          0, // 單價
+                          0, // 金額
+                          '',// 單一欄位備註
+                          '' // 相關號碼
+                      ]);
+                  }
+                  
+                  // 2.2 V 欄 (總備註)
+                  if (invoice.totalNote) {
+                      currentSequence += 1; // 序號 +1
+                      auxiliaryRows.push([
+                          lastInvoiceNumber, // 發票號碼
+                          lastInvoiceDate,   // 發票日期
+                          currentSequence,   // 序號 (前一列或 U 欄列 +1)
+                          `總備註：${invoice.totalNote}`, // 品名
+                          0, // 數量
+                          '',// 單位
+                          0, // 單價
+                          0, // 金額
+                          '',// 單一欄位備註
+                          '' // 相關號碼
+                      ]);
+                  }
+                  
+                  newDetailsRows.push(...auxiliaryRows);
+              }
+          });
+
+          // 3. 檢查最後一張發票是否包含輔助資訊但沒有任何明細
+          invoiceData.forEach(inv => {
+              const hasOriginalDetails = originalDetailsData.some(d => d.invoiceNumber === inv.invoiceNumber);
+              if (!hasOriginalDetails && (inv.carrierNo2 || inv.totalNote)) {
+                  // 找到發票日期 (通常在原始 Invoice 資料的 row[4])
+                  const originalInv = originalInvoiceData.find(o => o.invoiceNumber === inv.invoiceNumber);
+                  const invDate = originalInv ? originalInv.originalRow[4] || '' : '';
+                  
+                  // 重設序列
+                  currentSequence = 0; 
+
+                  const auxiliaryRows = [];
+                  
+                  // U 欄 (載具號碼2)
+                  if (inv.carrierNo2) {
+                      currentSequence += 1;
+                      auxiliaryRows.push([
+                          inv.invoiceNumber, // 發票號碼
+                          invDate,           // 發票日期
+                          currentSequence,   // 序號 (從 1 開始)
+                          `載具號碼：${inv.carrierNo2}`, // 品名
+                          0, // 數量
+                          '',// 單位
+                          0, // 單價
+                          0, // 金額
+                          '',// 單一欄位備註
+                          '' // 相關號碼
+                      ]);
+                  }
+                  
+                  // V 欄 (總備註)
+                  if (inv.totalNote) {
+                      currentSequence += 1;
+                      auxiliaryRows.push([
+                          inv.invoiceNumber, // 發票號碼
+                          invDate,           // 發票日期
+                          currentSequence,   // 序號
+                          `總備註：${inv.totalNote}`, // 品名
+                          0, // 數量
+                          '',// 單位
+                          0, // 單價
+                          0, // 金額
+                          '',// 單一欄位備註
+                          '' // 相關號碼
+                      ]);
+                  }
+                  
+                  newDetailsRows.push(...auxiliaryRows);
+              }
+          });
+
+
+          const ws2 = window.XLSX.utils.aoa_to_sheet([detailsHeaders, ...newDetailsRows]);
           window.XLSX.utils.book_append_sheet(wb, ws2, "Invoice_details");
 
           const dateStr = new Date().toISOString().slice(0,10);
@@ -1073,6 +1252,9 @@
 
       // 計算明細項目的背景色 (Step 4)
       const getItemBgClass = (item) => {
+        // 【優化 2-3】輔助項目無底色
+        if (item.isAuxiliary) return 'bg-gray-100 italic text-gray-500';
+
         const hasNoMatch = item.consolidatedIsNo;
         const hasNoRefMatch = item.consolidatedIsNoRefMatch;
         const hasPassMatch = item.consolidatedIsPass;
@@ -1090,6 +1272,9 @@
 
       // 計算 Step 5 明細項目的背景色 (要求 6)
       const getStep5ItemBgClass = (inv, item) => {
+        // 【優化 2-3】輔助項目無底色
+        if (item.isAuxiliary) return 'bg-gray-100 italic text-gray-500';
+
         // Step 5 列表中，只有 isChecked=0 的發票需要特殊底色
         if (inv.isChecked === 1) {
              return 'bg-gray-50'; 
@@ -1114,6 +1299,9 @@
       
       // 計算 Step 5 編輯畫面明細項目的底色 (要求 7)
       const getEditModalItemBgClass = (item) => {
+          // 【優化 2-3】輔助項目無底色
+          if (item.isAuxiliary) return 'bg-gray-100 italic text-gray-500';
+
           // 編輯畫面中，一律要依明細的規則條件顯示特殊底色 (要求 7)
           const hasNoMatch = item.consolidatedIsNo;
           const hasNoRefMatch = item.consolidatedIsNoRefMatch;
@@ -1156,7 +1344,8 @@
         
         if (!isStep4 && !isEditModal) return null;
         
-        if (!item.consolidatedIsNoRefMatch) return null;
+        // 【優化 2-4】輔助項目不顯示略過按鈕
+        if (!item.consolidatedIsNoRefMatch || item.isAuxiliary) return null;
 
         const currentInvoice = isStep4 ? pendingReviews[currentReviewIndex] : editingInvoice;
         if (!currentInvoice) return null;
@@ -1299,6 +1488,18 @@
                       </p>
                     </div>
                   </div>
+                  
+                  {/* 【優化 1-2】Step 4 顯示 U/V 欄資訊 */}
+                  {(pendingReviews[currentReviewIndex].carrierNo2 || pendingReviews[currentReviewIndex].totalNote) && (
+                      <div className="text-xs text-gray-600 mt-2 mb-3 space-y-1 bg-gray-50 p-2 rounded border">
+                          {pendingReviews[currentReviewIndex].carrierNo2 && (
+                              <p className="font-medium">載具號碼：{pendingReviews[currentReviewIndex].carrierNo2}</p>
+                          )}
+                          {pendingReviews[currentReviewIndex].totalNote && (
+                              <p className="font-medium">總備註：{pendingReviews[currentReviewIndex].totalNote}</p>
+                          )}
+                      </div>
+                  )}
 
                   <div className="mb-3">
                     <label className="block text-xs font-medium text-gray-700 mb-2">發票商品明細</label>
@@ -1321,7 +1522,7 @@
                               {item.name}{item.count>1?`（${item.count}項）`:''}
                             </span>
                             <div className="flex items-center gap-2">
-                                <span className={`text-xs text-gray-900 font-semibold ${itemWithTempStatus.consolidatedIsPass ? "amount-pass" : "text-gray-900"}`}>{$$formatAmount(item.amount)}元</span>
+                                <span className={`text-xs text-gray-900 font-semibold ${itemWithTempStatus.consolidatedIsPass ? "amount-pass" : "text-gray-900"}`}>{item.isAuxiliary ? 'N/A' : $$formatAmount(item.amount) + '元'}</span>
                                 {renderPassButton(item, pendingReviews[currentReviewIndex])}
                             </div>
                           </div>
@@ -1390,12 +1591,9 @@
                           <div className="flex items-center gap-3">
                             <span className={`${d?'bg-green-100 text-green-800': nd?'bg-red-100 text-red-800':'bg-yellow-100 text-yellow-800'} inline-flex px-2 py-1 text-xs font-semibold rounded-full`}>
                               {statusText}
-                              {/* 【修正點 1】移除 isChecked 狀態顯示 (待審/已審) */}
-                              {/* <span className="ml-1 text-gray-500">({inv.isChecked ? '已審' : '待審'})</span> */}
                             </span>
                             <span className="text-sm font-semibold text-gray-900">{inv.invoiceNumber}</span>
                             <span className="text-xs text-gray-500">
-                                {/* Step 5 列表中，isCheck=0 才顯示統編底色 */}
                                 <span className={sellerIdBgClass}>
                                     {inv.sellerId}
                                 </span> - {inv.sellerName}
@@ -1403,6 +1601,18 @@
                           </div>
                           <button onClick={()=>openEditModal(inv)} className="text-blue-600 hover:text-blue-900 font-medium text-xs">編輯</button>
                         </div>
+                        
+                        {/* 【優化 1-2】Step 5 列表顯示 U/V 欄資訊 */}
+                        {(inv.carrierNo2 || inv.totalNote) && (
+                            <div className="text-xs text-gray-600 mb-2 space-y-1 bg-gray-50 p-2 rounded border">
+                                {inv.carrierNo2 && (
+                                    <p className="font-medium">載具號碼：{inv.carrierNo2}</p>
+                                )}
+                                {inv.totalNote && (
+                                    <p className="font-medium">總備註：{inv.totalNote}</p>
+                                )}
+                            </div>
+                        )}
 
                         <div>
                           <h4 className="text-xs font-medium text-gray-700 mb-1">商品明細：</h4>
@@ -1418,7 +1628,7 @@
                                       {item.name}{item.count>1?`（${item.count}項）`:''}
                                     </span>
                                     <div className="flex items-center gap-2">
-                                        <span className={`font-semibold ${item.consolidatedIsPass ? "amount-pass" : "text-gray-900"}`}>{$$formatAmount(item.amount)}元</span>
+                                        <span className={`font-semibold ${item.consolidatedIsPass ? "amount-pass" : "text-gray-900"}`}>{item.isAuxiliary ? 'N/A' : $$formatAmount(item.amount) + '元'}</span>
                                     </div>
                                   </div>
                                 );
@@ -1520,6 +1730,18 @@
                     <label className="block text-xs font-medium text-gray-700 mb-1">賣方名稱</label>
                     <p className="text-sm">{editingInvoice.sellerName}</p>
                   </div>
+                  
+                  {/* 【優化 1-2】Step 5 編輯畫面顯示 U/V 欄資訊 */}
+                  {(editingInvoice.carrierNo2 || editingInvoice.totalNote) && (
+                      <div className="text-xs text-gray-600 mb-3 space-y-1 bg-gray-50 p-2 rounded border">
+                          {editingInvoice.carrierNo2 && (
+                              <p className="font-medium">載具號碼：{editingInvoice.carrierNo2}</p>
+                          )}
+                          {editingInvoice.totalNote && (
+                              <p className="font-medium">總備註：{editingInvoice.totalNote}</p>
+                          )}
+                      </div>
+                  )}
 
                   <div className="mb-4">
                     <label className="block text-xs font-medium text-gray-700 mb-2">商品明細</label>
@@ -1541,7 +1763,7 @@
                               {item.name}{item.count>1?`（${item.count}項）`:''}
                             </span>
                             <div className="flex items-center gap-2">
-                                <span className={`font-semibold ${itemWithTempStatus.consolidatedIsPass ? "amount-pass" : "text-gray-900"}`}>{$$formatAmount(item.amount)}元</span>
+                                <span className={`font-semibold ${itemWithTempStatus.consolidatedIsPass ? "amount-pass" : "text-gray-900"}`}>{item.isAuxiliary ? 'N/A' : $$formatAmount(item.amount) + '元'}</span>
                                 {renderPassButton(item, editingInvoice)}
                             </div>
                           </div>
