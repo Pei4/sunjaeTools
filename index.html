@@ -270,6 +270,7 @@
             consolidatedIsNo: hasAnyNo, 
             consolidatedIsNoRefMatch: hasAnyNoRefMatch,
             consolidatedIsPass: hasAnyPass, // 傳遞 Pass 狀態
+            isAuxiliary: false, // 確保合併項目不是輔助項目
           });
         }
         return res;
@@ -348,7 +349,7 @@
                 originalRow:   row,
                 rowIndex:      idx + 2,
                 isChecked:     0, 
-                // 【優化 1-1】讀取 U 欄 (20) 載具號碼2 和 V 欄 (21) 總備註
+                // U 欄 (20) 載具號碼2 和 V 欄 (21) 總備註
                 carrierNo2:    String(row[20] || '').trim(), 
                 totalNote:     String(row[21] || '').trim(),
               })).filter(x=>x.invoiceNumber);
@@ -442,26 +443,15 @@
 
       // 輔助函數：添加輔助明細行 (載具/備註)
       const injectAuxiliaryItems = (rawItems, inv) => {
-          const items = [...rawItems];
-          // 【優化 2-1】若有載具號碼2，添加輔助項目
-          if (inv.carrierNo2) {
-              items.push({
-                  name: `載具號碼：${inv.carrierNo2}`,
-                  amount: 0,
-                  originalIndex: -1, // 標記為非原始明細
-                  isAuxiliary: true, // 標記為輔助項目
-              });
-          }
-          // 【優化 2-2】若有總備註，添加輔助項目
-          if (inv.totalNote) {
-              items.push({
-                  name: `總備註：${inv.totalNote}`,
-                  amount: 0,
-                  originalIndex: -2, // 標記為非原始明細
-                  isAuxiliary: true, // 標記為輔助項目
-              });
-          }
-          return items;
+          // 輔助項目的資料只用於匯出，不應加入到 items 列表中以免影響顯示和審核邏輯
+          // 這裡我們只返回原始的 rawItems，讓 consolidatedItems 只處理真正的商品明細
+          
+          // *但是，如果我們需要在 Step 4/5 頁面的商品明細列表中顯示它，我們需要將其加入。
+          // 為了滿足「移除紅框處重複的載具號碼與備註、NA 標註」的要求，
+          // 我們只在頁面頂部的專門區塊顯示 U/V 欄資訊，而在明細列表 (items) 中不加入輔助項目。
+          
+          // 修正邏輯：不再將 U/V 欄資訊作為 items 注入。
+          return rawItems;
       }
       
       const searchRefData = async (customerIdParam, invoicesArg, detailsArg) => {
@@ -495,8 +485,8 @@
               .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex, isAuxiliary: d.isAuxiliary }))
               .filter(it => it.name);
 
-            // 注入輔助項目
-            rawItems = injectAuxiliaryItems(rawItems, inv);
+            // 修正：不再將 U/V 欄資訊作為 items 注入。
+            // rawItems = injectAuxiliaryItems(rawItems, inv);
 
             return { ...inv, buyerNote:'待查', isChecked: 0, items:rawItems, consolidatedItems:consolidateItems(rawItems) };
           });
@@ -514,8 +504,8 @@
               .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex, isAuxiliary: d.isAuxiliary }))
               .filter(it => it.name);
             
-            // 注入輔助項目
-            rawItems = injectAuxiliaryItems(rawItems, inv);
+            // 修正：不再將 U/V 欄資訊作為 items 注入。
+            // rawItems = injectAuxiliaryItems(rawItems, inv);
 
             return { ...inv, buyerNote:'待查', isChecked: 0, items:rawItems, consolidatedItems:consolidateItems(rawItems) };
           });
@@ -548,8 +538,8 @@
                   .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex, isAuxiliary: d.isAuxiliary }))
                   .filter(it => it.name);
                 
-                // 注入輔助項目
-                rawItems = injectAuxiliaryItems(rawItems, inv);
+                // 修正：不再將 U/V 欄資訊作為 items 注入。
+                // rawItems = injectAuxiliaryItems(rawItems, inv);
                 
                 // 計算每個明細的【明細】符合狀態 (排除輔助項目)
                 const checkableItems = rawItems.filter(item => !item.isAuxiliary);
@@ -656,8 +646,6 @@
         const reprocessed = targetList.map(inv => {
           
           // 【核心修正 1】如果發票是剛剛手動操作的發票，且 isChecked=1 (或已在外部被標記為 1)，直接返回。
-          // 註：因為 React 狀態更新的延遲性，這裡的 inv 可能是舊狀態，所以要檢查 inv.invoiceNumber === currentManualInvNo
-          // 但在 handleReviewDecision 中已處理，這裡主要關注其餘的 inv。
           if (inv.isChecked === 1 && inv.invoiceNumber !== currentManualInvNo) {
             return inv; 
           }
@@ -676,8 +664,8 @@
             .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex, isAuxiliary: d.isAuxiliary }))
             .filter(it => it.name);
 
-          // 注入輔助項目
-          rawItems = injectAuxiliaryItems(rawItems, inv);
+          // 修正：不再將 U/V 欄資訊作為 items 注入。
+          // rawItems = injectAuxiliaryItems(rawItems, inv);
           
           // 計算每個明細的【明細】符合狀態 (排除輔助項目)
           const checkableItems = rawItems.filter(item => !item.isAuxiliary);
@@ -1026,7 +1014,8 @@
                         .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex, isAuxiliary: d.isAuxiliary }))
                         .filter(it => it.name);
 
-                    rawItems = injectAuxiliaryItems(rawItems, inv);
+                    // 修正：不再將 U/V 欄資訊作為 items 注入。
+                    // rawItems = injectAuxiliaryItems(rawItems, inv);
 
                     const itemsWithStatus = rawItems.map(item => ({...item, ...checkItemMatch(item, inv.sellerId, updatedRefData)}));
                     const consolidatedItemsWithStatus = consolidateItems(itemsWithStatus);
@@ -1252,8 +1241,8 @@
 
       // 計算明細項目的背景色 (Step 4)
       const getItemBgClass = (item) => {
-        // 【優化 2-3】輔助項目無底色
-        if (item.isAuxiliary) return 'bg-gray-100 italic text-gray-500';
+        // 【修正 2】輔助項目不應出現在此列表中，但以防萬一，如果出現，避免特殊樣式
+        if (item.isAuxiliary) return 'bg-white'; 
 
         const hasNoMatch = item.consolidatedIsNo;
         const hasNoRefMatch = item.consolidatedIsNoRefMatch;
@@ -1272,8 +1261,8 @@
 
       // 計算 Step 5 明細項目的背景色 (要求 6)
       const getStep5ItemBgClass = (inv, item) => {
-        // 【優化 2-3】輔助項目無底色
-        if (item.isAuxiliary) return 'bg-gray-100 italic text-gray-500';
+        // 【修正 2】輔助項目不應出現在此列表中，但以防萬一，如果出現，避免特殊樣式
+        if (item.isAuxiliary) return 'bg-gray-50'; 
 
         // Step 5 列表中，只有 isChecked=0 的發票需要特殊底色
         if (inv.isChecked === 1) {
@@ -1299,8 +1288,8 @@
       
       // 計算 Step 5 編輯畫面明細項目的底色 (要求 7)
       const getEditModalItemBgClass = (item) => {
-          // 【優化 2-3】輔助項目無底色
-          if (item.isAuxiliary) return 'bg-gray-100 italic text-gray-500';
+          // 【修正 2】輔助項目不應出現在此列表中，但以防萬一，如果出現，避免特殊樣式
+          if (item.isAuxiliary) return 'bg-white'; 
 
           // 編輯畫面中，一律要依明細的規則條件顯示特殊底色 (要求 7)
           const hasNoMatch = item.consolidatedIsNo;
@@ -1344,7 +1333,7 @@
         
         if (!isStep4 && !isEditModal) return null;
         
-        // 【優化 2-4】輔助項目不顯示略過按鈕
+        // 【修正 1】輔助項目不顯示略過按鈕
         if (!item.consolidatedIsNoRefMatch || item.isAuxiliary) return null;
 
         const currentInvoice = isStep4 ? pendingReviews[currentReviewIndex] : editingInvoice;
@@ -1466,8 +1455,9 @@
                   <p className="text-sm text-gray-600">進度：{currentReviewIndex+1} / {pendingReviews.length}</p>
                 </div>
 
-                <div className="bg-white border rounded-lg p-4 flex-shrink-0" style={{height:'420px'}}>
-                  <div className="grid grid-cols-2 gap-4 mb-3 h-12">
+                {/* 【優化 3】移除固定的 height: '420px'，改用 flex-grow 和 flex-shrink-0 確保內容可滾動且底部固定 */}
+                <div className="bg-white border rounded-lg p-4 flex-1 overflow-y-auto min-h-0"> 
+                  <div className="grid grid-cols-2 gap-4 mb-3">
                     <div>
                       <label className="block text-xs font-medium text-gray-700 mb-1">發票號碼</label>
                       <p className="text-sm font-semibold">{pendingReviews[currentReviewIndex].invoiceNumber}</p>
@@ -1489,7 +1479,7 @@
                     </div>
                   </div>
                   
-                  {/* 【優化 1-2】Step 4 顯示 U/V 欄資訊 */}
+                  {/* 【修正 1】Step 4 顯示 U/V 欄資訊 (頂部區塊，非明細) */}
                   {(pendingReviews[currentReviewIndex].carrierNo2 || pendingReviews[currentReviewIndex].totalNote) && (
                       <div className="text-xs text-gray-600 mt-2 mb-3 space-y-1 bg-gray-50 p-2 rounded border">
                           {pendingReviews[currentReviewIndex].carrierNo2 && (
@@ -1503,9 +1493,9 @@
 
                   <div className="mb-3">
                     <label className="block text-xs font-medium text-gray-700 mb-2">發票商品明細</label>
-                    <div className="space-y-2 overflow-y-auto bg-gray-50 rounded p-2" style={{height:'240px'}}>
-                      {/* 明細項目顯示邏輯：顏色仍依明細規則判斷 */}
-                      {pendingReviews[currentReviewIndex].consolidatedItems?.map((item, idx) => {
+                    <div className="space-y-2 overflow-y-auto bg-gray-50 rounded p-2" style={{maxHeight:'200px'}}> {/* 限制明細高度 */}
+                      {/* 明細項目顯示邏輯：過濾掉 isAuxiliary 項目 */}
+                      {pendingReviews[currentReviewIndex].consolidatedItems?.filter(item => !item.isAuxiliary).map((item, idx) => {
                         
                         const isTempPassed = item.consolidatedIsPass || (
                             tempPassKeywords[pendingReviews[currentReviewIndex].invoiceNumber] &&
@@ -1522,7 +1512,8 @@
                               {item.name}{item.count>1?`（${item.count}項）`:''}
                             </span>
                             <div className="flex items-center gap-2">
-                                <span className={`text-xs text-gray-900 font-semibold ${itemWithTempStatus.consolidatedIsPass ? "amount-pass" : "text-gray-900"}`}>{item.isAuxiliary ? 'N/A' : $$formatAmount(item.amount) + '元'}</span>
+                                {/* 輔助項目已被過濾，因此無需檢查 item.isAuxiliary */}
+                                <span className={`text-xs text-gray-900 font-semibold ${itemWithTempStatus.consolidatedIsPass ? "amount-pass" : "text-gray-900"}`}>{$$formatAmount(item.amount)}元</span>
                                 {renderPassButton(item, pendingReviews[currentReviewIndex])}
                             </div>
                           </div>
@@ -1531,7 +1522,7 @@
                     </div>
                   </div>
 
-                  <div className="mb-3">
+                  <div className="mb-3 flex-shrink-0">
                     <div className="flex items-center justify-between mb-2">
                       <label className="block text-xs font-medium text-gray-700">新增關鍵字（選填）</label>
                       <div className="flex items-center gap-2">
@@ -1545,7 +1536,7 @@
                   </div>
                 </div>
 
-                <div className="h-12 flex gap-3 items-center flex-shrink-0">
+                <div className="h-12 flex gap-3 items-center flex-shrink-0 mt-3"> {/* 增加 mt-3 確保間隔 */}
                   <button onClick={()=>handleReviewDecision('deductible')}
                           className="flex-1 bg-green-500 text-white px-4 py-2 text-xs rounded-lg hover:bg-green-600 transition-colors">
                     可扣抵
@@ -1602,7 +1593,7 @@
                           <button onClick={()=>openEditModal(inv)} className="text-blue-600 hover:text-blue-900 font-medium text-xs">編輯</button>
                         </div>
                         
-                        {/* 【優化 1-2】Step 5 列表顯示 U/V 欄資訊 */}
+                        {/* 【修正 1】Step 5 列表顯示 U/V 欄資訊 (頂部區塊，非明細) */}
                         {(inv.carrierNo2 || inv.totalNote) && (
                             <div className="text-xs text-gray-600 mb-2 space-y-1 bg-gray-50 p-2 rounded border">
                                 {inv.carrierNo2 && (
@@ -1617,7 +1608,8 @@
                         <div>
                           <h4 className="text-xs font-medium text-gray-700 mb-1">商品明細：</h4>
                           <div className="space-y-1">
-                            {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.map((item, i)=>{
+                            {/* 明細列表：過濾掉 isAuxiliary 項目 */}
+                            {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.filter(item => !item.isAuxiliary).map((item, i)=>{
                                 {/* 明細顏色判斷 (isChecked=1 時為 bg-gray-50) */}
                                 const bgColorClass = getStep5ItemBgClass(inv, item);
                                 const passTextColorClass = getPassTextColorClass(item);
@@ -1628,7 +1620,7 @@
                                       {item.name}{item.count>1?`（${item.count}項）`:''}
                                     </span>
                                     <div className="flex items-center gap-2">
-                                        <span className={`font-semibold ${item.consolidatedIsPass ? "amount-pass" : "text-gray-900"}`}>{item.isAuxiliary ? 'N/A' : $$formatAmount(item.amount) + '元'}</span>
+                                        <span className={`font-semibold ${item.consolidatedIsPass ? "amount-pass" : "text-gray-900"}`}>{$$formatAmount(item.amount)}元</span>
                                     </div>
                                   </div>
                                 );
@@ -1701,7 +1693,7 @@
 
             {showEditModal && editingInvoice && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                <div className="bg-white rounded-lg p-4 max-w-2xl w-full mx-4 max-h-98 overflow-y-auto">
+                <div className="bg-white rounded-lg p-4 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto"> {/* 調整 Modal 高度 */}
                   <h3 className="text-sm font-bold mb-3">編輯發票審核結果</h3>
 
                   <div className="grid grid-cols-2 gap-3 mb-3">
@@ -1731,7 +1723,7 @@
                     <p className="text-sm">{editingInvoice.sellerName}</p>
                   </div>
                   
-                  {/* 【優化 1-2】Step 5 編輯畫面顯示 U/V 欄資訊 */}
+                  {/* 【修正 1】Step 5 編輯畫面顯示 U/V 欄資訊 (頂部區塊，非明細) */}
                   {(editingInvoice.carrierNo2 || editingInvoice.totalNote) && (
                       <div className="text-xs text-gray-600 mb-3 space-y-1 bg-gray-50 p-2 rounded border">
                           {editingInvoice.carrierNo2 && (
@@ -1745,8 +1737,9 @@
 
                   <div className="mb-4">
                     <label className="block text-xs font-medium text-gray-700 mb-2">商品明細</label>
-                    <div className="space-y-1 max-h-32 overflow-y-auto">
-                      {(editingInvoice.consolidatedItems||[]).map((item, i)=>{
+                    <div className="space-y-1 max-h-40 overflow-y-auto"> {/* 限制明細高度 */}
+                      {/* 明細列表：過濾掉 isAuxiliary 項目 */}
+                      {(editingInvoice.consolidatedItems||[]).filter(item => !item.isAuxiliary).map((item, i)=>{
                         {/* 明細顏色完全依賴自身的 Item-level 規則 (要求 7) */}
                         const isTempPassed = item.consolidatedIsPass || (
                             tempPassKeywords[editingInvoice.invoiceNumber] &&
@@ -1763,7 +1756,7 @@
                               {item.name}{item.count>1?`（${item.count}項）`:''}
                             </span>
                             <div className="flex items-center gap-2">
-                                <span className={`font-semibold ${itemWithTempStatus.consolidatedIsPass ? "amount-pass" : "text-gray-900"}`}>{item.isAuxiliary ? 'N/A' : $$formatAmount(item.amount) + '元'}</span>
+                                <span className={`font-semibold ${itemWithTempStatus.consolidatedIsPass ? "amount-pass" : "text-gray-900"}`}>{$$formatAmount(item.amount)}元</span>
                                 {renderPassButton(item, editingInvoice)}
                             </div>
                           </div>
@@ -1775,7 +1768,7 @@
                     </div>
                   </div>
 
-                  <div className="mb-4">
+                  <div className="mb-4 flex-shrink-0">
                     <div className="flex items-center justify-between mb-2">
                       <label className="block text-xs font-medium text-gray-700">新增關鍵字（選填）</label>
                       <div className="flex items-center gap-2">
@@ -1789,7 +1782,7 @@
                       className="w-full p-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"/>
                   </div>
 
-                  <div className="flex gap-3">
+                  <div className="flex gap-3 flex-shrink-0">
                     <button onClick={()=>handleEditDecision('deductible')}
                             className="flex-1 bg-green-500 text-white px-3 py-2 text-xs rounded-lg hover:bg-green-600 transition-colors">
                       可扣抵
