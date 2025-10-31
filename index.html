@@ -307,7 +307,17 @@
           }
           setOriginalInvoiceData(invoiceSheetData);
           setOriginalDetailsData(detailsSheetData);
-          setInvoiceData(invoiceSheetData);
+          (function(newArr) {
+      // Merge 保留既有 isChecked，除非 newArr 明確給定
+      const mapOld = new Map(invoiceData.map(x => [x.invoiceNumber, x]));
+      const merged = newArr.map(obj => ({
+        ...(mapOld.get(obj.invoiceNumber) || {}),
+        ...obj,
+        isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((mapOld.get(obj.invoiceNumber) || {}).isChecked ?? 0),
+      }));
+      console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
+      setInvoiceData(merged);
+    })(invoiceSheetData);
           setInvoiceDetailsData(detailsSheetData);
           await searchRefData(id, invoiceSheetData, detailsSheetData);
         } catch (e) {
@@ -1099,11 +1109,8 @@
 
       // 計算 Step 5 明細項目的背景色 (要求 6)
       const getStep5ItemBgClass = (inv, item) => {
-        // Step 5 列表中，只有 isChecked=0 且 buyerNote === '待查' 的發票需要特殊底色
-        // 已審核或非「待查」視為已完成，Step 5 不再顯示特殊底色
-        if (inv.isChecked === 1 || inv.buyerNote !== '待查') {
-             return 'bg-gray-50'; 
-        }
+        // 僅 isChecked===0 才需要顯示待審特殊底色；已審 (isChecked===1) 一律採用一般底色
+        if (inv.isChecked === 1) { return 'bg-gray-50'; }
         
         // isChecked=0 的發票，明細顏色與 getItemBgClass 保持一致
         const hasNoMatch = item.consolidatedIsNo;
@@ -1154,8 +1161,8 @@
 
       // 判斷 Step 5 列表中的賣方統編底色樣式 (要求 6)
       const getStep5SellerIdBgClass = (inv, refData) => {
-          // isChecked=1 或 buyerNote !== '待查' 都不需要特殊底色
-          if (inv.isChecked === 1 || inv.buyerNote !== '待查') return ''; // isChecked=1 則沒有特殊底色
+          // 僅 isChecked===0 才需要顯示待審特殊底色；已審 (isChecked===1) 不上色
+          if (inv.isChecked === 1) return ''; // isChecked=1 則沒有特殊底色
           return getSellerIdBgClass(inv.sellerId, refData);
       };
 
