@@ -144,7 +144,7 @@
         const normalized = normalizeRefData(data, customerId);
         if (normalized) return normalized;
       } catch(e){
-        // console.error("Error fetching ref data:", e);
+        setInfo('');
       }
       try {
         const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}&customerId=${encodeURIComponent(customerId)}`, {
@@ -155,7 +155,7 @@
         const normalized = normalizeRefData(data, customerId);
         if (normalized) return normalized;
       } catch(e){
-        // console.error("Error fetching ref data:", e);
+        setInfo('');
       }
       return null;
     }
@@ -374,7 +374,7 @@
         let isNo = false;
         let isPass = false;
 
-        // 檢查是否符合可扣抵
+        // 檢查是否符合可扣抵 (Keyword Only)
         isYes = yesRefs.some(r => {
           const rs = String(r.sellerId||'').trim();
           const rk = (r.keyword||'').toString();
@@ -382,12 +382,12 @@
           const keywordMatch = rk && itemName.includes(rk);
           
           if (rs && rk) return sellerMatch && keywordMatch;
-          if (rs && !rk) return false; // 純統編規則不影響明細狀態
+          if (rs && !rk) return false; 
           if (!rs && rk) return keywordMatch;
           return false;
         });
 
-        // 檢查是否符合不可扣抵
+        // 檢查是否符合不可扣抵 (Keyword Only)
         isNo = noRefs.some(r => {
           const rs = String(r.sellerId||'').trim();
           const rk = (r.keyword||'').toString();
@@ -395,12 +395,12 @@
           const keywordMatch = rk && itemName.includes(rk);
           
           if (rs && rk) return sellerMatch || keywordMatch;
-          if (rs && !rk) return false; // 純統編規則不影響明細狀態
+          if (rs && !rk) return false; 
           if (!rs && rk) return keywordMatch;
           return false;
         });
 
-        // 檢查是否符合模糊項目 (isPass)
+        // 檢查是否符合模糊項目 (Keyword Only)
         if (!isYes && !isNo) {
             isPass = passRefs.some(r => {
                 const rs = String(r.sellerId||'').trim();
@@ -409,7 +409,7 @@
                 const keywordMatch = rk && itemName.includes(rk);
                 
                 if (rs && rk) return sellerMatch || keywordMatch;
-                if (rs && !rk) return false; // 純統編規則不影響明細狀態
+                if (rs && !rk) return false; 
                 if (!rs && rk) return keywordMatch;
                 return false;
             });
@@ -460,7 +460,7 @@
               .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
               .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
               .filter(it => it.name);
-            return { ...inv, buyerNote:'待查', items:rawItems, consolidatedItems:consolidateItems(rawItems) };
+            return { ...inv, buyerNote:'待查', isChecked: 0, items:rawItems, consolidatedItems:consolidateItems(rawItems) };
           });
           setInvoiceData(cleaned);
           setPendingReviews(cleaned);
@@ -475,7 +475,7 @@
               .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
               .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
               .filter(it => it.name);
-            return { ...inv, buyerNote:'待查', items:rawItems, consolidatedItems:consolidateItems(rawItems) };
+            return { ...inv, buyerNote:'待查', isChecked: 0, items:rawItems, consolidatedItems:consolidateItems(rawItems) };
           });
           setInvoiceData(cleaned);
           setPendingReviews(cleaned);
@@ -517,35 +517,42 @@
 
                 // 統計數量
                 const totalItems = itemsWithStatus.length;
-                const matchNoItems  = itemsWithStatus.filter(s => s.isNo).length;            
-                const noMatchItems  = itemsWithStatus.filter(s => !s.isYes && !s.isNo && !s.isPass).length; 
+                const matchNoItems  = itemsWithStatus.filter(s => s.isNo).length; // 不可扣項目數量
+                const matchYesItems = itemsWithStatus.filter(s => s.isYes).length; // 可扣項目數量
+                const matchPassItems = itemsWithStatus.filter(s => s.isPass).length; // 略過項目數量
+                const noMatchItems  = itemsWithStatus.filter(s => !s.isYes && !s.isNo && !s.isPass).length; // 黃底項目數量
                 
                 // 檢查是否有純賣方統編的可扣抵/不可扣抵規則
                 const isSellerIdNoRule  = isSellerIdNonDeductible(inv.sellerId, useRef);
                 const isSellerIdYesRule = isSellerIdDeductible(inv.sellerId, useRef);
 
-
-                // *********** 發票自動審核邏輯 (要求 2) ***********
+                // *********** 發票自動審核邏輯 (要求 1) ***********
                 let buyerNote = '待查';
                 let isChecked = 0; // 預設待審核
-                
+
                 if (totalItems === 0) {
                    buyerNote = '待查';
-                   isChecked = 0;
-                } else if (isSellerIdNoRule) {
-                    // 1. 發票的賣方統編為不可扣抵賣方，則更新 buyerNote 為不可扣（isChecked=0）
-                    buyerNote = '不得抵扣之進貨及費用';
-                    isChecked = 0; // 統編不可扣，不需要人工審核明細，但 isChecked = 0 待確認
-                } else if (isSellerIdYesRule) {
-                    // 2. 發票的賣方統編為可扣抵賣方，則更新 buyerNote 為可扣（isChecked=0）
-                    buyerNote = '';
-                    isChecked = 0; // 統編可扣，不需要人工審核明細，但 isChecked = 0 待確認
                 } else if (matchNoItems > 0) {
-                    // 3. 同一張發票內只要有一個不可扣項目就自動更新 buyerNote 為不可扣（isChecked = 0）
+                    // 1. 同一張發票內只要有一個不可扣項目就自動更新 buyerNote 為不可扣
                     buyerNote = '不得抵扣之進貨及費用';
-                    isChecked = 0;
+                    // 若所有品項都是不可扣則 isChecked = 1，否則 isChecked = 0
+                    if (matchNoItems === totalItems) {
+                        isChecked = 1;
+                    } else {
+                        isChecked = 0;
+                    }
+                } else if (isSellerIdNoRule) {
+                    // 2. 發票的賣方統編為不可扣抵賣方，更新 buyerNote 為不可扣
+                    buyerNote = '不得抵扣之進貨及費用';
+                    // 若明細中有未確認的黃底項目則 isChecked=0
+                    isChecked = (noMatchItems === 0) ? 1 : 0;
+                } else if (isSellerIdYesRule) {
+                    // 3. 發票的賣方統編為可扣抵賣方，更新 buyerNote 為可扣
+                    buyerNote = '';
+                    // 若明細中有未確認的黃底項目則 isChecked=0
+                    isChecked = (noMatchItems === 0) ? 1 : 0;
                 } else if (noMatchItems === 0) {
-                    // 4. 同一張發票內只有可扣和略過的項目時自動更新 buyerNote 為可扣（isChecked = 1）
+                    // 4. 同一張發票內只有可扣和略過的項目時自動更新 buyerNote 為可扣
                     buyerNote = ''; 
                     isChecked = 1;
                 } else { 
@@ -565,6 +572,7 @@
               });
 
               setInvoiceData(cleaned);
+              // 篩選出所有 buyerNote='待查' 的發票進入人工審核
               const pending = cleaned.filter(i => i.buyerNote === '待查');
               setPendingReviews(pending);
               setStep(pending.length ? 4 : 5);
@@ -591,12 +599,12 @@
       };
       
       // 根據最新規則重新處理待審核發票（用於 Yes/No 決定時）
-      const reprocessPendingInvoices = (currentRefData, checkAllZeroed=false) => {
+      const reprocessPendingInvoices = (currentRefData) => {
         const currentNo = pendingReviews[currentReviewIndex]?.invoiceNumber;
         
         const reprocessed = invoiceData.map(inv => {
-          // 只處理 '待查' 項目，或當 checkAllZeroed=true 時處理 isChecked=0 項目
-          if (inv.buyerNote !== '待查' && (!checkAllZeroed || inv.isChecked !== 0)) return inv;
+          // 只處理 '待查' 項目
+          if (inv.buyerNote !== '待查') return inv;
           
           const rawItems = invoiceDetailsData
             .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
@@ -621,35 +629,37 @@
           const isSellerIdYesRule = isSellerIdDeductible(inv.sellerId, currentRefData);
 
 
-          // *********** 發票自動審核邏輯 (應用最終規則/要求 8) ***********
-          let buyerNote = inv.buyerNote; // 保持原樣或重新判斷
-          let isChecked = inv.isChecked; // 保持原樣或重新判斷
+          // *********** 發票自動審核邏輯 (應用最終規則) ***********
+          let buyerNote = '待查';
+          let isChecked = 0; // 預設待審核
           
-          // 只有在 inv.buyerNote === '待查' (Step 4 處理中) 或 checkAllZeroed=true (Step 5 檢查) 時才重新判斷
-          if (inv.buyerNote === '待查' || checkAllZeroed) {
-              
-              buyerNote = '待查';
-              isChecked = 0; // 假設需要人工審核，除非被自動判斷覆蓋
-
-              if (totalItems === 0) {
-                 buyerNote = '待查';
-                 isChecked = 0;
-              } else if (isSellerIdNoRule) {
-                  buyerNote = '不得抵扣之進貨及費用';
-                  isChecked = 0;
-              } else if (isSellerIdYesRule) {
-                  buyerNote = '';
-                  isChecked = 0;
-              } else if (matchNoItems > 0) {
-                  buyerNote = '不得抵扣之進貨及費用';
-                  isChecked = 0;
-              } else if (noMatchItems === 0) {
-                  buyerNote = ''; 
-                  isChecked = 1; // 滿足自動可扣，設置為已檢查
-              } else { 
-                  buyerNote = '待查';
+          if (totalItems === 0) {
+             buyerNote = '待查';
+          } else if (matchNoItems > 0) {
+              // 1. 若有任一筆明細為不可扣抵，則該張發票註記為不可扣抵 (明細優先)
+              buyerNote = '不得抵扣之進貨及費用';
+              // 若所有品項都是不可扣則 isChecked = 1，否則 isChecked = 0
+              if (matchNoItems === totalItems) {
+                  isChecked = 1;
+              } else {
                   isChecked = 0;
               }
+          } else if (isSellerIdNoRule) {
+              // 2. 若明細無不可扣抵，但賣方統編有不可扣抵規則
+              buyerNote = '不得抵扣之進貨及費用';
+              isChecked = (noMatchItems === 0) ? 1 : 0;
+          } else if (isSellerIdYesRule) {
+              // 3. 若明細無不可扣抵，但賣方統編有可扣抵規則
+              buyerNote = '';
+              isChecked = (noMatchItems === 0) ? 1 : 0;
+          } else if (noMatchItems === 0) {
+              // 4. 若所有發票明細皆為可扣抵或略過，則註記為可扣抵
+              buyerNote = ''; 
+              isChecked = 1;
+          } else { 
+              // 5. 其餘不符上述條件，則繼續 Step 4 人工審核
+              buyerNote = '待查';
+              isChecked = 0;
           }
           // **********************************
 
@@ -750,6 +760,7 @@
             reprocessPendingInvoices(updatedRefData); 
         } else {
             // 【模式 1: 僅手動審核/不新增規則】
+            
             // 找出所有仍待審核的發票（當前發票已標記為新狀態，將被過濾掉）
             const allReviewedData = updated.filter(i => i.buyerNote === '待查');
             
@@ -924,6 +935,7 @@
                     .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
                     .filter(it => it.name);
 
+                // 重新檢查明細匹配
                 const itemsWithStatus = rawItems.map(item => ({...item, ...checkItemMatch(item, inv.sellerId, updatedRefData)}));
                 const consolidatedItemsWithStatus = consolidateItems(itemsWithStatus);
 
@@ -945,6 +957,7 @@
                     .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
                     .filter(it => it.name);
                 
+                // 重新檢查 Item 狀態
                 const itemStatuses = rawItems.map(item => checkItemMatch(item, inv.sellerId, updatedRefData));
                 const itemsWithStatus = rawItems.map((item, index) => ({...item, ...itemStatuses[index]}));
 
@@ -953,9 +966,20 @@
 
                 // 若檢查後的明細皆為可扣/略過，則將 Checked 設定為 1
                 if (matchNoItems === 0 && noMatchItems === 0) {
-                    return { ...inv, buyerNote: '', isChecked: 1, items: itemsWithStatus, consolidatedItems: consolidateItems(itemsWithStatus) };
+                    return { 
+                        ...inv, 
+                        buyerNote: '', 
+                        isChecked: 1, 
+                        items: itemsWithStatus, 
+                        consolidatedItems: consolidateItems(itemsWithStatus) 
+                    };
                 }
-                return inv;
+                // 否則，僅更新 Item 狀態以便 Step 5 列表顯示正確顏色 (要求 2 的第二部分)
+                return { 
+                    ...inv, 
+                    items: itemsWithStatus, 
+                    consolidatedItems: consolidateItems(itemsWithStatus) 
+                };
             });
             
             setInvoiceData(reprocessed);
@@ -1046,7 +1070,7 @@
         }
       };
 
-      // 計算明細項目的背景色 (Step 4 / Edit Modal)
+      // 計算明細項目的背景色 (Step 4)
       const getItemBgClass = (item) => {
         const hasNoMatch = item.consolidatedIsNo;
         const hasNoRefMatch = item.consolidatedIsNoRefMatch;
@@ -1063,9 +1087,9 @@
         return 'bg-white';
       };
 
-      // 計算 Step 5 明細項目的背景色
+      // 計算 Step 5 明細項目的背景色 (要求 6)
       const getStep5ItemBgClass = (inv, item) => {
-        // Step 5 列表中，只有 isChecked=0 的發票需要特殊底色 (要求 6)
+        // Step 5 列表中，只有 isChecked=0 的發票需要特殊底色
         if (inv.isChecked === 1) {
              return 'bg-gray-50'; 
         }
@@ -1105,7 +1129,7 @@
       };
       
 
-      // 判斷賣方統編底色樣式 (要求 5)
+      // 判斷賣方統編底色樣式 (要求 7)
       const getSellerIdBgClass = (sellerId, refData) => {
           if (!sellerId) return '';
           if (isSellerIdNonDeductible(sellerId, refData)) {
@@ -1119,7 +1143,7 @@
 
       // 判斷 Step 5 列表中的賣方統編底色樣式 (要求 6)
       const getStep5SellerIdBgClass = (inv, refData) => {
-          if (inv.isChecked === 1) return '';
+          if (inv.isChecked === 1) return ''; // isChecked=1 則沒有特殊底色
           return getSellerIdBgClass(inv.sellerId, refData);
       };
 
@@ -1354,7 +1378,7 @@
                     if (d) statusText = '可扣抵';
                     else if (nd) statusText = '不可扣抵';
                     
-                    // 2. 賣方統編為不可扣抵時，買方統編需顯示紅底
+                    // 賣方統編底色判斷
                     const sellerIdBgClass = getStep5SellerIdBgClass(inv, refData);
 
                     return (
@@ -1381,7 +1405,7 @@
                           <h4 className="text-xs font-medium text-gray-700 mb-1">商品明細：</h4>
                           <div className="space-y-1">
                             {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.map((item, i)=>{
-                                {/* 明細顏色判斷 (要求 6) */}
+                                {/* 【修正點 3, 4, 5】明細顏色判斷 (要求 6) */}
                                 const bgColorClass = getStep5ItemBgClass(inv, item);
                                 const passTextColorClass = getPassTextColorClass(item);
 
