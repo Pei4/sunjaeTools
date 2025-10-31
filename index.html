@@ -747,9 +747,10 @@
         // 步驟 2: 處理發票狀態更新 (手動標記優先於自動判斷) & isChecked = 1 (要求 1)
         const updated = invoiceData.map(inv =>
           inv.invoiceNumber === current.invoiceNumber
-            ? { ...inv, buyerNote: newBuyerNote, isChecked: 1 } // 【核心修正點】手動點擊，強制 isChecked = 1
+            ? { ...inv, buyerNote: newBuyerNote, isChecked: 1 }
             : inv
         );
+        console.debug('[Audit] Step4.handleReviewDecision -> set isChecked=1', { invoiceNumber: current.invoiceNumber, buyerNote: newBuyerNote });
         setInvoiceData(updated);
 
         // 步驟 3: 執行模式流程
@@ -918,6 +919,7 @@
             ? { ...inv, buyerNote: newBuyerNote, isChecked: 1 } 
             : inv
         );
+        console.debug('[Audit] Step5.handleEditDecision -> set isChecked=1', { invoiceNumber: currentInv.invoiceNumber, buyerNote: newBuyerNote });
         
         // 步驟 3: 執行流程 (處理所有 isChecked=0 發票)
         if (isAddingRule) {
@@ -1097,8 +1099,9 @@
 
       // 計算 Step 5 明細項目的背景色 (要求 6)
       const getStep5ItemBgClass = (inv, item) => {
-        // Step 5 列表中，只有 isChecked=0 的發票需要特殊底色
-        if (inv.isChecked === 1) {
+        // Step 5 列表中，只有 isChecked=0 且 buyerNote === '待查' 的發票需要特殊底色
+        // 已審核或非「待查」視為已完成，Step 5 不再顯示特殊底色
+        if (inv.isChecked === 1 || inv.buyerNote !== '待查') {
              return 'bg-gray-50'; 
         }
         
@@ -1151,7 +1154,8 @@
 
       // 判斷 Step 5 列表中的賣方統編底色樣式 (要求 6)
       const getStep5SellerIdBgClass = (inv, refData) => {
-          if (inv.isChecked === 1) return ''; // isChecked=1 則沒有特殊底色
+          // isChecked=1 或 buyerNote !== '待查' 都不需要特殊底色
+          if (inv.isChecked === 1 || inv.buyerNote !== '待查') return ''; // isChecked=1 則沒有特殊底色
           return getSellerIdBgClass(inv.sellerId, refData);
       };
 
