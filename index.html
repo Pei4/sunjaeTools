@@ -603,6 +603,10 @@
         const currentNo = pendingReviews[currentReviewIndex]?.invoiceNumber;
         
         const reprocessed = invoiceData.map(inv => {
+          
+          // 【核心修正 1】優先檢查 isChecked: 1 的發票，直接返回，不進行重新計算
+          if (inv.isChecked === 1) return inv;
+
           // 只處理 '待查' 且 isChecked=0 的發票
           if (inv.buyerNote !== '待查' || inv.isChecked !== 0) return inv;
           
@@ -661,6 +665,10 @@
               isChecked = 0;
           }
           // **********************************
+          
+          // 【埋設 Log 方便排查】
+          console.log(`reprocess: 發票 ${inv.invoiceNumber} 重新判斷結果: buyerNote=${buyerNote}, isChecked=${isChecked}`);
+
 
           return { 
             ...inv, 
@@ -744,18 +752,22 @@
           setUseSellerIdOnly(false);
         }
         
-        // 步驟 2: 處理發票狀態更新 (手動標記優先於自動判斷) & isChecked = 1 (要求 1)
+        // 步驟 2: 處理發票狀態更新 (手動標記優先於自動判斷) & isChecked = 1
         const updated = invoiceData.map(inv =>
           inv.invoiceNumber === current.invoiceNumber
-            ? { ...inv, buyerNote: newBuyerNote, isChecked: 1 } // 【核心修正點】手動點擊，強制 isChecked = 1
+            ? { ...inv, buyerNote: newBuyerNote, isChecked: 1 } // <--- 手動設定為 1
             : inv
         );
         setInvoiceData(updated);
+        
+        // 【埋設 Log 方便排查】
+        console.log(`handleReviewDecision: 發票 ${current.invoiceNumber} 手動審核結果: buyerNote=${newBuyerNote}, isChecked=1`);
 
         // 步驟 3: 執行模式流程
         if (isAddingRule) {
             // 【模式 2: 新增規則並審核】: 檢查其他待審發票
             const updatedRefData = [...refData, ...newRefs];
+            // reprocessPendingInvoices 內部已修正，會忽略 isChecked=1 的發票
             reprocessPendingInvoices(updatedRefData); 
         } else {
             // 【模式 1: 僅手動審核/不新增規則】: 直接更新 pendingReviews 列表
@@ -915,10 +927,14 @@
         // 步驟 2: 更新發票狀態 & isChecked = 1 (手動編輯/確認完成，一律設為 1)
         let updatedInvoiceData = invoiceData.map(inv =>
           inv.invoiceNumber === currentInv.invoiceNumber
-            ? { ...inv, buyerNote: newBuyerNote, isChecked: 1 } 
+            ? { ...inv, buyerNote: newBuyerNote, isChecked: 1 } // <--- 手動設定為 1
             : inv
         );
         
+        // 【埋設 Log 方便排查】
+        console.log(`handleEditDecision: 發票 ${currentInv.invoiceNumber} 手動審核結果: buyerNote=${newBuyerNote}, isChecked=1`);
+
+
         // 步驟 3: 執行流程 (處理所有 isChecked=0 發票)
         if (isAddingRule) {
             // 【模式 2: 新增規則並審核】: 重新檢查所有 isChecked=0 發票 (要求 2)
@@ -928,6 +944,8 @@
             const currentInvoiceIndex = updatedInvoiceData.findIndex(inv => inv.invoiceNumber === currentInv.invoiceNumber);
             if (currentInvoiceIndex !== -1) {
                 const inv = updatedInvoiceData[currentInvoiceIndex];
+                
+                // 由於已經手動審核，這裡只需要更新 items/consolidatedItems 的視覺狀態，不需要重新計算 isChecked/buyerNote
                 const rawItems = invoiceDetailsData
                     .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
                     .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex }))
@@ -938,8 +956,7 @@
 
                 updatedInvoiceData[currentInvoiceIndex] = { 
                     ...inv, 
-                    buyerNote: newBuyerNote, 
-                    isChecked: 1, 
+                    // 確保 isChecked 和 buyerNote 不被覆蓋
                     items: itemsWithStatus, 
                     consolidatedItems: consolidatedItemsWithStatus 
                 };
@@ -947,6 +964,10 @@
             
             // 檢查所有 isChecked=0 的發票 (要求 2)
             const reprocessed = updatedInvoiceData.map(inv => {
+                
+                // 【核心修正 2】優先檢查 isChecked: 1 的發票，直接返回，不進行重新計算
+                if (inv.isChecked === 1) return inv;
+
                 // 只處理 isChecked=0 的發票
                 if (inv.isChecked !== 0) return inv;
 
@@ -973,20 +994,27 @@
                 const isSellerIdYesRule = isSellerIdDeductible(inv.sellerId, updatedRefData);
 
                 // --- 狀態更新/升級邏輯 ---
+                let newBuyerNoteCheck = newInv.buyerNote;
                 if (matchNoItems > 0) {
-                    newInv.buyerNote = '不得抵扣之進貨及費用';
+                    newBuyerNoteCheck = '不得抵扣之進貨及費用';
                 } else if (isSellerIdNoRule) {
-                    newInv.buyerNote = '不得抵扣之進貨及費用';
+                    newBuyerNoteCheck = '不得抵扣之進貨及費用';
                 } else if (isSellerIdYesRule) {
-                    newInv.buyerNote = '';
+                    newBuyerNoteCheck = '';
                 }
                 
                 // 若檢查後的明細皆為可扣/略過，則將 Checked 設定為 1 (要求 2 - 升級 Checked)
                 if (matchNoItems === 0 && noMatchItems === 0) {
                     newInv.buyerNote = ''; // 符合自動可扣
                     newInv.isChecked = 1; 
-                } 
+                } else {
+                    newInv.buyerNote = newBuyerNoteCheck;
+                    newInv.isChecked = 0;
+                }
                 
+                // 【埋設 Log 方便排查】
+                console.log(`reprocess(Edit): 發票 ${inv.invoiceNumber} 重新判斷結果: buyerNote=${newInv.buyerNote}, isChecked=${newInv.isChecked}`);
+
                 // 即使發票狀態沒有升級，Item 狀態和 ConsolidatedItems 也要更新，以便 Step 5 列表顯示正確顏色
                 return newInv;
             });
