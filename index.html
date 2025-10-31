@@ -529,7 +529,7 @@
                 // *********** 發票自動審核邏輯 (要求 1 - 匯入 Excel 階段) ***********
                 let buyerNote = '待查';
                 let isChecked = 0; // 預設待審核
-                
+
                 if (totalItems === 0) {
                    buyerNote = '待查';
                 } else if (matchNoItems > 0) {
@@ -544,12 +544,12 @@
                 } else if (isSellerIdNoRule) {
                     // 2. 發票的賣方統編為不可扣抵賣方，更新 buyerNote 為不可扣
                     buyerNote = '不得抵扣之進貨及費用';
-                    // 若明細中有未確認的黃底項目則 isChecked=0
+                    // 若明細中有未確認的黃底項目則 isChecked=0，否則 isChecked=1
                     isChecked = (noMatchItems === 0) ? 1 : 0;
                 } else if (isSellerIdYesRule) {
                     // 3. 發票的賣方統編為可扣抵賣方，更新 buyerNote 為可扣
                     buyerNote = '';
-                    // 若明細中有未確認的黃底項目則 isChecked=0
+                    // 若明細中有未確認的黃底項目則 isChecked=0，否則 isChecked=1
                     isChecked = (noMatchItems === 0) ? 1 : 0;
                 } else if (noMatchItems === 0) {
                     // 4. 同一張發票內只有可扣和略過的項目時自動更新 buyerNote 為可扣
@@ -598,7 +598,7 @@
         return newRefs;
       };
       
-      // 根據最新規則重新處理待審核發票（用於 Yes/No 決定時）
+      // 根據最新規則重新處理待審核發票（用於 Step 4 新增規則時觸發）
       const reprocessPendingInvoices = (currentRefData) => {
         const currentNo = pendingReviews[currentReviewIndex]?.invoiceNumber;
         
@@ -704,7 +704,7 @@
         let currentRefData = refData;
         const newRefs = [];
 
-        // 檢查是否處於「新增條件模式」（要求 3）
+        // 檢查是否處於「新增條件模式」
         const isAddingRule = isKeywordAdded || isSellerIdOnlyRule || isPassKeywordSet;
 
         // 步驟 1: 處理關鍵字新增 / 純統編新增 / Pass 規則
@@ -760,7 +760,7 @@
         } else {
             // 【模式 1: 僅手動審核/不新增規則】
             
-            // 找出所有仍待審核的發票（當前發票已標記為新狀態，將被過濾掉）
+            // 找出所有仍待審核的發票（當前發票已標記為非待查，將被過濾掉）
             const allReviewedData = updated.filter(i => i.buyerNote === '待查');
             
             if (!allReviewedData.length) {
@@ -919,7 +919,7 @@
             : inv
         );
         
-        // 步驟 3: 執行流程 (模式 2: 新增規則並審核)
+        // 步驟 3: 執行流程 (模式 2: 新增規則並審核 或 模式 1: 僅手動審核)
         if (isAddingRule) {
             // 【模式 2: 新增規則並審核】: 重新檢查所有 isChecked=0 發票 (要求 2)
             const updatedRefData = [...refData, ...newRefs];
@@ -968,15 +968,24 @@
                     consolidatedItems: consolidateItems(itemsWithStatus) 
                 };
 
+                // 重新執行發票自動審核邏輯
+                const isSellerIdNoRule  = isSellerIdNonDeductible(inv.sellerId, updatedRefData);
+                const isSellerIdYesRule = isSellerIdDeductible(inv.sellerId, updatedRefData);
+
+                if (matchNoItems > 0) {
+                    newInv.buyerNote = '不得抵扣之進貨及費用';
+                } else if (isSellerIdNoRule) {
+                    newInv.buyerNote = '不得抵扣之進貨及費用';
+                } else if (isSellerIdYesRule) {
+                    newInv.buyerNote = '';
+                }
+                
                 // 若檢查後的明細皆為可扣/略過，則將 Checked 設定為 1 (要求 2 - 升級 Checked)
                 if (matchNoItems === 0 && noMatchItems === 0) {
                     newInv.buyerNote = ''; // 符合自動可扣
                     newInv.isChecked = 1; 
-                } else if (matchNoItems > 0) {
-                    newInv.buyerNote = '不得抵扣之進貨及費用';
-                }
-
-                // 即使發票狀態沒有升級，Item 狀態和 ConsolidatedItems 也要更新，以便 Step 5 列表顯示正確顏色
+                } 
+                
                 return newInv;
             });
             
