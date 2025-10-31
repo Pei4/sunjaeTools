@@ -63,6 +63,14 @@
         border-radius: 4px;
     }
   </style>
+<script>
+  // --- Invoice helpers ---
+  function normalizeInvoiceNumber(v){
+    try {
+      return String(v||'').trim().replace(/\s+/g,'').toUpperCase();
+    } catch(e){ return v; }
+  }
+</script>
 </head>
 <body class="bg-gray-50">
   <div id="root"></div>
@@ -307,17 +315,24 @@
           }
           setOriginalInvoiceData(invoiceSheetData);
           setOriginalDetailsData(detailsSheetData);
-          (function(newArr) {
-      // Merge 保留既有 isChecked，除非 newArr 明確給定
-      const mapOld = new Map(invoiceData.map(x => [x.invoiceNumber, x]));
-      const merged = newArr.map(obj => ({
-        ...(mapOld.get(obj.invoiceNumber) || {}),
-        ...obj,
-        isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((mapOld.get(obj.invoiceNumber) || {}).isChecked ?? 0),
-      }));
-      console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
-      setInvoiceData(merged);
-    })(invoiceSheetData);
+          (function(newArr){
+  const mapOld = new Map(invoiceData.map(x => [normalizeInvoiceNumber(x.invoiceNumber), x]));
+  const merged = newArr.map(obj => {
+    const key = normalizeInvoiceNumber(obj.invoiceNumber);
+    const prev = mapOld.get(key);
+    if(!prev){
+      console.debug('[Audit] merge MISS invoiceNumber (normalized)', { key, original: obj.invoiceNumber });
+    }
+    return {
+      ...(prev || {}),
+      ...obj,
+      invoiceNumber: key || obj.invoiceNumber,
+      isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((prev || {}).isChecked ?? 0),
+    };
+  });
+  console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
+  setInvoiceData(merged);
+})(invoiceSheetData);
           setInvoiceDetailsData(detailsSheetData);
           await searchRefData(id, invoiceSheetData, detailsSheetData);
         } catch (e) {
@@ -473,12 +488,20 @@
             return { ...inv, buyerNote:'待查', isChecked: 0, items:rawItems, consolidatedItems:consolidateItems(rawItems) };
           });
           (function(newArr){
-  const mapOld = new Map(invoiceData.map(x => [x.invoiceNumber, x]));
-  const merged = newArr.map(obj => ({
-    ...(mapOld.get(obj.invoiceNumber) || {}),
-    ...obj,
-    isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((mapOld.get(obj.invoiceNumber) || {}).isChecked ?? 0),
-  }));
+  const mapOld = new Map(invoiceData.map(x => [normalizeInvoiceNumber(x.invoiceNumber), x]));
+  const merged = newArr.map(obj => {
+    const key = normalizeInvoiceNumber(obj.invoiceNumber);
+    const prev = mapOld.get(key);
+    if(!prev){
+      console.debug('[Audit] merge MISS invoiceNumber (normalized)', { key, original: obj.invoiceNumber });
+    }
+    return {
+      ...(prev || {}),
+      ...obj,
+      invoiceNumber: key || obj.invoiceNumber,
+      isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((prev || {}).isChecked ?? 0),
+    };
+  });
   console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
   setInvoiceData(merged);
 })(cleaned);
@@ -497,12 +520,20 @@
             return { ...inv, buyerNote:'待查', isChecked: 0, items:rawItems, consolidatedItems:consolidateItems(rawItems) };
           });
           (function(newArr){
-  const mapOld = new Map(invoiceData.map(x => [x.invoiceNumber, x]));
-  const merged = newArr.map(obj => ({
-    ...(mapOld.get(obj.invoiceNumber) || {}),
-    ...obj,
-    isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((mapOld.get(obj.invoiceNumber) || {}).isChecked ?? 0),
-  }));
+  const mapOld = new Map(invoiceData.map(x => [normalizeInvoiceNumber(x.invoiceNumber), x]));
+  const merged = newArr.map(obj => {
+    const key = normalizeInvoiceNumber(obj.invoiceNumber);
+    const prev = mapOld.get(key);
+    if(!prev){
+      console.debug('[Audit] merge MISS invoiceNumber (normalized)', { key, original: obj.invoiceNumber });
+    }
+    return {
+      ...(prev || {}),
+      ...obj,
+      invoiceNumber: key || obj.invoiceNumber,
+      isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((prev || {}).isChecked ?? 0),
+    };
+  });
   console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
   setInvoiceData(merged);
 })(cleaned);
@@ -600,12 +631,20 @@
               });
 
               (function(newArr){
-  const mapOld = new Map(invoiceData.map(x => [x.invoiceNumber, x]));
-  const merged = newArr.map(obj => ({
-    ...(mapOld.get(obj.invoiceNumber) || {}),
-    ...obj,
-    isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((mapOld.get(obj.invoiceNumber) || {}).isChecked ?? 0),
-  }));
+  const mapOld = new Map(invoiceData.map(x => [normalizeInvoiceNumber(x.invoiceNumber), x]));
+  const merged = newArr.map(obj => {
+    const key = normalizeInvoiceNumber(obj.invoiceNumber);
+    const prev = mapOld.get(key);
+    if(!prev){
+      console.debug('[Audit] merge MISS invoiceNumber (normalized)', { key, original: obj.invoiceNumber });
+    }
+    return {
+      ...(prev || {}),
+      ...obj,
+      invoiceNumber: key || obj.invoiceNumber,
+      isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((prev || {}).isChecked ?? 0),
+    };
+  });
   console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
   setInvoiceData(merged);
 })(cleaned);
@@ -709,12 +748,20 @@
         });
         
         (function(newArr){
-  const mapOld = new Map(invoiceData.map(x => [x.invoiceNumber, x]));
-  const merged = newArr.map(obj => ({
-    ...(mapOld.get(obj.invoiceNumber) || {}),
-    ...obj,
-    isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((mapOld.get(obj.invoiceNumber) || {}).isChecked ?? 0),
-  }));
+  const mapOld = new Map(invoiceData.map(x => [normalizeInvoiceNumber(x.invoiceNumber), x]));
+  const merged = newArr.map(obj => {
+    const key = normalizeInvoiceNumber(obj.invoiceNumber);
+    const prev = mapOld.get(key);
+    if(!prev){
+      console.debug('[Audit] merge MISS invoiceNumber (normalized)', { key, original: obj.invoiceNumber });
+    }
+    return {
+      ...(prev || {}),
+      ...obj,
+      invoiceNumber: key || obj.invoiceNumber,
+      isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((prev || {}).isChecked ?? 0),
+    };
+  });
   console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
   setInvoiceData(merged);
 })(reprocessed);
@@ -793,17 +840,24 @@
         // 步驟 2: 處理發票狀態更新 (手動標記優先於自動判斷) & isChecked = 1 (要求 1)
         const updated = invoiceData.map(inv =>
           inv.invoiceNumber === current.invoiceNumber
-            ? { ...inv, buyerNote: newBuyerNote, isChecked: 1 }
+            ? { ...inv, invoiceNumber: normalizeInvoiceNumber(inv.invoiceNumber), buyerNote: newBuyerNote, isChecked: 1 } // 【核心修正點】手動點擊，強制 isChecked = 1
             : inv
         );
-        console.debug('[Audit] Step4.handleReviewDecision -> set isChecked=1', { invoiceNumber: current.invoiceNumber, buyerNote: newBuyerNote });
         (function(newArr){
-  const mapOld = new Map(invoiceData.map(x => [x.invoiceNumber, x]));
-  const merged = newArr.map(obj => ({
-    ...(mapOld.get(obj.invoiceNumber) || {}),
-    ...obj,
-    isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((mapOld.get(obj.invoiceNumber) || {}).isChecked ?? 0),
-  }));
+  const mapOld = new Map(invoiceData.map(x => [normalizeInvoiceNumber(x.invoiceNumber), x]));
+  const merged = newArr.map(obj => {
+    const key = normalizeInvoiceNumber(obj.invoiceNumber);
+    const prev = mapOld.get(key);
+    if(!prev){
+      console.debug('[Audit] merge MISS invoiceNumber (normalized)', { key, original: obj.invoiceNumber });
+    }
+    return {
+      ...(prev || {}),
+      ...obj,
+      invoiceNumber: key || obj.invoiceNumber,
+      isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((prev || {}).isChecked ?? 0),
+    };
+  });
   console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
   setInvoiceData(merged);
 })(updated);
@@ -971,10 +1025,9 @@
         // 步驟 2: 更新發票狀態 & isChecked = 1 (手動編輯/確認完成，一律設為 1)
         let updatedInvoiceData = invoiceData.map(inv =>
           inv.invoiceNumber === currentInv.invoiceNumber
-            ? { ...inv, buyerNote: newBuyerNote, isChecked: 1 } 
+            ? { ...inv, invoiceNumber: normalizeInvoiceNumber(inv.invoiceNumber), buyerNote: newBuyerNote, isChecked: 1 } 
             : inv
         );
-        console.debug('[Audit] Step5.handleEditDecision -> set isChecked=1', { invoiceNumber: currentInv.invoiceNumber, buyerNote: newBuyerNote });
         
         // 步驟 3: 執行流程 (處理所有 isChecked=0 發票)
         if (isAddingRule) {
@@ -1049,12 +1102,20 @@
             });
             
             (function(newArr){
-  const mapOld = new Map(invoiceData.map(x => [x.invoiceNumber, x]));
-  const merged = newArr.map(obj => ({
-    ...(mapOld.get(obj.invoiceNumber) || {}),
-    ...obj,
-    isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((mapOld.get(obj.invoiceNumber) || {}).isChecked ?? 0),
-  }));
+  const mapOld = new Map(invoiceData.map(x => [normalizeInvoiceNumber(x.invoiceNumber), x]));
+  const merged = newArr.map(obj => {
+    const key = normalizeInvoiceNumber(obj.invoiceNumber);
+    const prev = mapOld.get(key);
+    if(!prev){
+      console.debug('[Audit] merge MISS invoiceNumber (normalized)', { key, original: obj.invoiceNumber });
+    }
+    return {
+      ...(prev || {}),
+      ...obj,
+      invoiceNumber: key || obj.invoiceNumber,
+      isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((prev || {}).isChecked ?? 0),
+    };
+  });
   console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
   setInvoiceData(merged);
 })(reprocessed);
@@ -1065,12 +1126,20 @@
         } else {
             // 【模式 1: 僅手動審核】
             (function(newArr){
-  const mapOld = new Map(invoiceData.map(x => [x.invoiceNumber, x]));
-  const merged = newArr.map(obj => ({
-    ...(mapOld.get(obj.invoiceNumber) || {}),
-    ...obj,
-    isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((mapOld.get(obj.invoiceNumber) || {}).isChecked ?? 0),
-  }));
+  const mapOld = new Map(invoiceData.map(x => [normalizeInvoiceNumber(x.invoiceNumber), x]));
+  const merged = newArr.map(obj => {
+    const key = normalizeInvoiceNumber(obj.invoiceNumber);
+    const prev = mapOld.get(key);
+    if(!prev){
+      console.debug('[Audit] merge MISS invoiceNumber (normalized)', { key, original: obj.invoiceNumber });
+    }
+    return {
+      ...(prev || {}),
+      ...obj,
+      invoiceNumber: key || obj.invoiceNumber,
+      isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((prev || {}).isChecked ?? 0),
+    };
+  });
   console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
   setInvoiceData(merged);
 })(updatedInvoiceData);
@@ -1172,8 +1241,10 @@
 
       // 計算 Step 5 明細項目的背景色 (要求 6)
       const getStep5ItemBgClass = (inv, item) => {
-        // 僅 isChecked===0 才需要顯示待審特殊底色；已審 (isChecked===1) 一律採用一般底色
-        if (inv.isChecked === 1) { return 'bg-gray-50'; }
+        // Step 5 列表中，只有 isChecked=0 的發票需要特殊底色
+        if (inv.isChecked === 1) {
+             return 'bg-gray-50'; 
+        }
         
         // isChecked=0 的發票，明細顏色與 getItemBgClass 保持一致
         const hasNoMatch = item.consolidatedIsNo;
@@ -1224,7 +1295,6 @@
 
       // 判斷 Step 5 列表中的賣方統編底色樣式 (要求 6)
       const getStep5SellerIdBgClass = (inv, refData) => {
-          // 僅 isChecked===0 才需要顯示待審特殊底色；已審 (isChecked===1) 不上色
           if (inv.isChecked === 1) return ''; // isChecked=1 則沒有特殊底色
           return getSellerIdBgClass(inv.sellerId, refData);
       };
@@ -1554,12 +1624,20 @@
                   <button onClick={()=>{
                             setStep(1); setUploadedFile(null);
                             (function(newArr){
-  const mapOld = new Map(invoiceData.map(x => [x.invoiceNumber, x]));
-  const merged = newArr.map(obj => ({
-    ...(mapOld.get(obj.invoiceNumber) || {}),
-    ...obj,
-    isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((mapOld.get(obj.invoiceNumber) || {}).isChecked ?? 0),
-  }));
+  const mapOld = new Map(invoiceData.map(x => [normalizeInvoiceNumber(x.invoiceNumber), x]));
+  const merged = newArr.map(obj => {
+    const key = normalizeInvoiceNumber(obj.invoiceNumber);
+    const prev = mapOld.get(key);
+    if(!prev){
+      console.debug('[Audit] merge MISS invoiceNumber (normalized)', { key, original: obj.invoiceNumber });
+    }
+    return {
+      ...(prev || {}),
+      ...obj,
+      invoiceNumber: key || obj.invoiceNumber,
+      isChecked: (typeof obj.isChecked === 'number') ? obj.isChecked : ((prev || {}).isChecked ?? 0),
+    };
+  });
   console.debug('[Audit] merge invoiceData', { mergedCount: merged.length });
   setInvoiceData(merged);
 })([]); setInvoiceDetailsData([]);
