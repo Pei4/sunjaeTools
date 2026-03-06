@@ -357,6 +357,7 @@
             } else {
               const processed = rows.map((row, idx) => ({
                 invoiceNumber: row[0] || '',
+                sequenceRaw:   row[2],
                 itemName:      row[3] || '',
                 amount:        $$parseAmount(row[7]),
                 originalRow:   row,
@@ -1114,23 +1115,47 @@
           // 處理 Invoice_details 工作表
           const detailsHeaders = ["發票號碼","發票日期","序號","品名","數量","單位","單價","金額","單一欄位備註","相關號碼"];
           const newDetailsRows = [];
+
+          const normalizeSequenceForExport = (rawValue, fallbackSequence) => {
+            const text = String(rawValue ?? '').trim();
+            if (!text) {
+              return { value: fallbackSequence + 1, lastNumericSequence: fallbackSequence };
+            }
+            if (text.toUpperCase() === 'ZZ') {
+              return { value: 'ZZ', lastNumericSequence: fallbackSequence };
+            }
+            const numeric = Number(text);
+            if (Number.isFinite(numeric)) {
+              return { value: numeric, lastNumericSequence: numeric };
+            }
+            return { value: text, lastNumericSequence: fallbackSequence };
+          };
           
           let lastInvoiceNumber = '';
           let lastInvoiceDate = '';
           let currentSequence = 0;
+          let currentInvoiceForSequence = '';
 
           // 根據原始明細數據進行處理
           originalDetailsData.forEach(d => {
               const invoice = invoiceData.find(inv => inv.invoiceNumber === d.invoiceNumber);
               
+              // 換發票時，序號重新從該發票自己的數列開始累計，避免跨發票污染
+              if (d.invoiceNumber !== currentInvoiceForSequence) {
+                  currentInvoiceForSequence = d.invoiceNumber;
+                  currentSequence = 0;
+              }
+
               // 1. 處理原始明細行
               const originalRow = [...d.originalRow];
               // 確保發票號碼和日期被正確更新以便後續插入
               if (originalRow[0]) lastInvoiceNumber = originalRow[0];
               if (originalRow[1]) lastInvoiceDate = originalRow[1];
-              // 更新序號
-              currentSequence = originalRow[2] ? Number(originalRow[2]) : currentSequence + 1;
-              originalRow[2] = currentSequence; 
+
+              // 更新序號：保留 ZZ，避免被 Number('ZZ') 轉成 NaN
+              const sequenceInfo = normalizeSequenceForExport(originalRow[2], currentSequence);
+              originalRow[2] = sequenceInfo.value;
+              currentSequence = sequenceInfo.lastNumericSequence;
               newDetailsRows.push(originalRow);
 
               // 2. 檢查是否需要插入輔助明細 (只在該發票的明細結束時檢查一次)
@@ -1145,7 +1170,7 @@
                       auxiliaryRows.push([
                           lastInvoiceNumber, // 發票號碼
                           lastInvoiceDate,   // 發票日期
-                          currentSequence,   // 序號 (前一列 +1)
+                          currentSequence,   // 序號 (前一個數字序號 +1)
                           `載具號碼：${invoice.carrierNo2}`, // 品名
                           0, // 數量
                           '',// 單位
