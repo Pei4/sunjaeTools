@@ -1,0 +1,1886 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>發票審核系統</title>
+  <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script>
+    (function loadXLSX() {
+      function add(src, onload) {
+        var s = document.createElement('script');
+        s.src = src;
+        s.onload = onload;
+        s.onerror = function(){ console.warn('載入失敗：', src); };
+        document.head.appendChild(s);
+      }
+      add('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js', function(){
+        if (!window.XLSX) {
+          add('https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js', function(){
+            if (!window.XLSX) {
+              console.error('無法載入 XLSX 函式庫。');
+              alert('載入 XLSX 函式庫失敗，請重新整理或檢查網路／CDN。');
+            }
+          });
+        }
+      });
+    })();
+  </script>
+  <style>
+    .work-container{width:100%}
+    @media (min-width: 800px){.work-container{width:70%;margin:0 auto}}
+    
+    /* 覆寫自訂顏色 */
+    .bg-custom-yellow {
+      background-color: rgb(248, 225, 108);
+    }
+    .bg-custom-red {
+      background-color: rgb(254, 226, 226);
+    }
+    /* 【新增】Pass 項目樣式，使用 Tailwind 灰底 (gray-200) 和 深灰字 (gray-600) */
+    .isPassStyles {
+        background-color: rgb(229, 231, 235); /* gray-200 */
+    }
+    .isPassStyles .text-pass {
+        color: rgb(75, 85, 99) !important; /* gray-600 */
+    }
+    .isPassStyles .amount-pass {
+        color: rgb(75, 85, 99) !important; /* gray-600 */
+    }
+    /* 【新增/修改】賣方統編底色 */
+    .seller-id-deductible { /* 綠底 */
+        background-color: rgb(220, 252, 231); /* green-100 */
+        padding: 2px 4px;
+        border-radius: 4px;
+    }
+    .seller-id-non-deductible { /* 紅底 */
+        background-color: rgb(254, 202, 202); /* red-200 */
+        padding: 2px 4px;
+        border-radius: 4px;
+    }
+  </style>
+</head>
+<body class="bg-gray-50">
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="env,react">
+    const { useState, useEffect, useMemo } = React;
+
+    const $$formatAmount = (n) => {
+      const num = (typeof n === 'number') ? n : Number(n||0);
+      try { return num.toLocaleString(); } catch { return String(num); }
+    };
+    const $$parseAmount = (v) => {
+      if (typeof v === 'number') return v;
+      const s = String(v ?? '')
+        .replace(/,/g, '')
+        .replace(/\s+/g, '')
+        .replace(/[NT$\xA0]/gi, '')
+        .replace(/[^0-9.\-]/g, '');
+      const n = Number(s || 0);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    function Icon({name, className="w-5 h-5"}) {
+      const icons = {
+        upload: <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="M5 20h14v-2H5v2Zm7-18l-5 5h3v6h4V7h3l-5-5Z"/></svg>,
+        file:   <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12V8z"/><path fill="#ffffff33" d="M14 2v6h6"/></svg>,
+        db:     <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="M12 3c-4.97 0  -9 1.79-9 4v10c0 2.21 4.03 4 9 4s9-1.79 9-4V7c0-2.21-4.03-4-9-4Zm0 2c3.86 0 7 .9 7 2s-3.14 2-7 2-7-.9-7-2 3.14-2 7-2Zm7 5.09V12c0 1.1-3.14 2-7 2s-7-.9-7-2V10.09C7.21 10.68 9.45 11 12 11s4.79-.32 7-0.91Zm0 5V17c0 1.1-3.14 2-7 2s-7-.9-7-2v-1.91C7.21 15.68 9.45 16 12 16s4.79-.32 7-0.91Z"/></svg>,
+        check:  <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>,
+        x:      <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="m19 6.41-1.41-1.41L12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>,
+        save:   <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="M17 3H5a2 2 0 0 0-2 2v14l4-4h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z"/></svg>,
+        warn:   <svg viewBox="0 0 24 24" className={className}><path fill="currentColor" d="M1 21h22L12 2 1 21Zm12-3h-2v-2h2v2Zm0-4h-2v-4h2v4Z"/></svg>,
+      };
+      return icons[name] ?? null;
+    }
+
+    function useApiKey() {
+      const [apiKey, setApiKey] = useState('');
+      useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        setApiKey(params.get('key') || '');
+      }, []);
+      return apiKey;
+    }
+
+    function normalizeRefData(raw, fallbackCustomerId) {
+      if (!raw) return null;
+      const coerce = (obj) => {
+        if (!obj || typeof obj !== 'object') return null;
+        const src = obj.fields ? obj.fields : obj;
+        const customerId = String(src.customerId ?? fallbackCustomerId ?? '').trim();
+        const deductable = (src.deductable ?? src.deductible ?? '').toString().trim();
+        const sellerId   = (src.sellerId ?? '').toString().trim();
+        const keyword    = (src.keyword ?? '').toString().trim();
+        if (!deductable && !sellerId && !keyword) return null;
+        return { customerId, deductable, sellerId, keyword };
+      };
+      let arr = [];
+      if (Array.isArray(raw)) arr = raw;
+      else if (raw && Array.isArray(raw.data)) arr = raw.data;
+      else if (raw && Array.isArray(raw.result)) arr = raw.result;
+      else if (raw && Array.isArray(raw.items)) arr = raw.items;
+      else if (raw && raw.records && Array.isArray(raw.records)) arr = raw.records;
+      else if (typeof raw === 'object') arr = [raw];
+      else return null;
+      const mapped = arr.map(coerce).filter(Boolean);
+      return mapped.length ? mapped : null;
+    }
+
+    async function fetchRefDataFromN8n({ apiKey, customerId }) {
+      const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/get-ref-data';
+      const headers = { 'X-API-Key': apiKey };
+      try {
+        const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ customerId }),
+        });
+        const data = await res.json().catch(()=>null);
+        const normalized = normalizeRefData(data, customerId);
+        if (normalized) return normalized;
+      } catch(e){
+        setInfo('');
+      }
+      try {
+        const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}&customerId=${encodeURIComponent(customerId)}`, {
+          method: 'GET',
+          headers,
+        });
+        const data = await res.json().catch(()=>null);
+        const normalized = normalizeRefData(data, customerId);
+        if (normalized) return normalized;
+      } catch(e){
+        setInfo('');
+      }
+      return null;
+    }
+
+    // keepalive: true
+    async function addRefRuleToN8n({ apiKey, customerId, rules }) {
+      const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/add-ref-data';
+      const headers = { 'X-API-Key': apiKey, 'Content-Type': 'application/json' };
+      const payload = { customerId, rules };
+      const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+        keepalive: true
+      });
+      if (!res.ok) throw new Error(`n8n 回應非 2xx（HTTP ${res.status}）`);
+      return await res.json().catch(() => ({}));
+    }
+
+    function InvoiceReviewApp() {
+      const apiKey = useApiKey();
+      const [step, setStep] = useState(1);
+      const [companyId, setCompanyId] = useState('');
+      const [uploadedFile, setUploadedFile] = useState(null);
+
+      const [invoiceData, setInvoiceData] = useState([]);
+      const [invoiceDetailsData, setInvoiceDetailsData] = useState([]);
+      const [originalInvoiceData, setOriginalInvoiceData] = useState([]);
+      const [originalDetailsData, setOriginalDetailsData] = useState([]);
+
+      const [refData, setRefData] = useState([]);
+      const [fixedRefData, setFixedRefData] = useState([]);
+
+      const [pendingReviews, setPendingReviews] = useState([]);
+      const [currentReviewIndex, setCurrentReviewIndex] = useState(0);
+
+      const [newKeyword, setNewKeyword] = useState('');
+      const [includeSellerID, setIncludeSellerID] = useState(false);
+      const [editIncludeSellerID, setEditIncludeSellerID] = useState(false);
+      
+      const [useSellerIdOnly, setUseSellerIdOnly] = useState(false);
+      const [editUseSellerIdOnly, setEditUseSellerIdOnly] = useState(false);
+
+      const [progress, setProgress] = useState(0);
+      const [error, setError] = useState('');
+      const [info, setInfo] = useState('');
+      const [showEditModal, setShowEditModal] = useState(false);
+      const [editingInvoice, setEditingInvoice] = useState(null);
+      const [newlyAddedRefData, setNewlyAddedRefData] = useState([]);
+      
+      // Pass Modal 相關狀態
+      const [showPassModal, setShowPassModal] = useState(false);
+      const [currentPassItem, setCurrentPassItem] = useState(null); 
+      const [passKeywordInput, setPassKeywordInput] = useState(''); 
+      const [tempPassKeywords, setTempPassKeywords] = useState({}); 
+
+      const [n8nGetStatus, setN8nGetStatus] = useState(null);
+      const [n8nAddStatus, setN8nAddStatus] = useState(null);
+
+      const calculateSimilarity = (a,b)=>{
+        a=(a||'').toString(); b=(b||'').toString();
+        const longer=a.length>b.length?a:b, shorter=a.length>b.length?b:a;
+        if (!longer.length) return 1.0;
+        const m = Array(shorter.length+1).fill().map(()=>Array(longer.length+1).fill(0));
+        for(let i=0;i<=shorter.length;i++) m[i][0]=i;
+        for(let j=0;j<=longer.length;j++) m[0][j]=j;
+        for(let i=1;i<=shorter.length;i++){
+          for(let j=1;j<=longer.length;j++){
+            m[i][j]=shorter[i-1]===longer[j-1]?m[i-1][j-1]:Math.min(m[i-1][j-1],m[i][j-1],m[i-1][j])+1;
+          }
+        }
+        const d=m[shorter.length][longer.length];
+        return (longer.length-d)/longer.length;
+      };
+
+      // 以品名相似度 0.8 分組，並加總金額 
+      const consolidateItems = (items)=>{
+        if(!items||!items.length) return [];
+        const res=[], used=new Set();
+        for(let i=0;i<items.length;i++){
+          if(used.has(i)) continue;
+          const cur=items[i]; const similarIdx=[i]; used.add(i);
+          
+          // 排除非審核項目 (如載具號碼、總備註)
+          if(cur.isAuxiliary) { 
+              res.push(cur); 
+              continue; 
+          }
+
+          for(let j=i+1;j<items.length;j++){
+            if(used.has(j) || items[j].isAuxiliary) continue;
+            if(calculateSimilarity(cur.name,items[j].name)>=0.8){ similarIdx.push(j); used.add(j); }
+          }
+          let name = cur.name;
+          if (similarIdx.length>1){
+            name = similarIdx.map(k=>items[k].name).reduce((x,y)=>x.length<y.length?x:y);
+          }
+          const rawItemsIndex = similarIdx.map(k => items[k].originalIndex);
+          const sum = similarIdx.reduce((acc,k)=>acc + (Number(items[k].amount)||0), 0);
+          
+          // 彙整合併項目的明細狀態，方便渲染時判斷顏色
+          const hasAnyNo = similarIdx.some(k => items[k].isNo);
+          const hasAnyPass = similarIdx.some(k => items[k].isPass); 
+          // consolidatedIsNoRefMatch: 既非 Yes, 亦非 No, 亦非 Pass
+          const hasAnyNoRefMatch = similarIdx.some(k => !items[k].isYes && !items[k].isNo && !items[k].isPass); 
+
+          res.push({ 
+            name, 
+            count: similarIdx.length, 
+            amount: sum, 
+            rawItemsIndex,
+            consolidatedIsNo: hasAnyNo, 
+            consolidatedIsNoRefMatch: hasAnyNoRefMatch,
+            consolidatedIsPass: hasAnyPass, // 傳遞 Pass 狀態
+            isAuxiliary: false, // 確保合併項目不是輔助項目
+          });
+        }
+        return res;
+      };
+
+      const ensureXLSXReady = ()=>{
+        if (!window.XLSX) {
+          throw new Error('XLSX 函式庫尚未載入完成，請稍後再試或重新整理頁面');
+        }
+      };
+
+      const handleFileUpload = async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        if (!file.name.endsWith('.xlsx')) {
+          setError('請上傳 Excel 檔案（.xlsx 格式）'); return;
+        }
+        setError('');
+        setUploadedFile(file);
+        const id = file.name.substring(0,8);
+        setCompanyId(id);
+
+        try {
+          ensureXLSXReady();
+          // 讀取 Invoice 或 btb411w_xls1
+          let invoiceSheetData;
+          try {
+            invoiceSheetData = await readExcelSheet(file, 'Invoice');
+          } catch {
+            invoiceSheetData = await readExcelSheet(file, 'btb411w_xls1');
+          }
+          // 讀取 Invoice_details 或 btb411w_xls2
+          let detailsSheetData;
+          try {
+            detailsSheetData = await readExcelSheet(file, 'Invoice_details');
+          } catch {
+            detailsSheetData = await readExcelSheet(file, 'btb411w_xls2');
+          }
+          if (!invoiceSheetData || !detailsSheetData) {
+            setError('無法讀取工作表，請確認檔案包含 Invoice / btb411w_xls1 與 Invoice_details / btb411w_xls2');
+            return;
+          }
+          setOriginalInvoiceData(invoiceSheetData);
+          setOriginalDetailsData(detailsSheetData);
+          setInvoiceData(invoiceSheetData);
+          setInvoiceDetailsData(detailsSheetData);
+          await searchRefData(id, invoiceSheetData, detailsSheetData);
+        } catch (e) {
+          setError('檔案讀取失敗：' + (e?.message || String(e)));
+        }
+      };
+
+      const readExcelSheet = (file, sheetName) => new Promise((resolve, reject) => {
+        try { ensureXLSXReady(); } catch(e){ reject(e); return; }
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const data = new Uint8Array(e.target.result);
+            const wb = window.XLSX.read(data, { type:'array' });
+            if (!wb.SheetNames.includes(sheetName)) {
+              reject(new Error('找不到工作表: ' + sheetName)); return;
+            }
+            const ws = wb.Sheets[sheetName];
+            const json = window.XLSX.utils.sheet_to_json(ws, { header:1 });
+            if (json.length < 2) {
+              reject(new Error('工作表 ' + sheetName + ' 資料不足')); return;
+            }
+            const rows = json.slice(1);
+            const isInvoiceHeader = ['Invoice', 'btb411w_xls1'].includes(String(sheetName).trim());
+            if (isInvoiceHeader) {
+              const processed = rows.map((row, idx) => ({
+                invoiceNumber: row[0] || '',
+                buyerNote:     row[1] || '',
+                sellerId:      String(row[7] || ''),
+                sellerName:    row[8] || '',
+                originalRow:   row,
+                rowIndex:      idx + 2,
+                isChecked:     0, 
+                // U 欄 (20) 載具號碼2 和 V 欄 (21) 總備註
+                carrierNo2:    String(row[20] || '').trim(), 
+                totalNote:     String(row[21] || '').trim(),
+              })).filter(x=>x.invoiceNumber);
+              resolve(processed);
+            } else {
+              const processed = rows.map((row, idx) => ({
+                invoiceNumber: row[0] || '',
+                sequenceRaw:   row[2],
+                itemName:      row[3] || '',
+                amount:        $$parseAmount(row[7]),
+                originalRow:   row,
+                rowIndex:      idx + 2,
+                originalIndex: idx, // 紀錄原始明細的索引
+                isAuxiliary:   false, // 預設不是輔助項目
+              })).filter(it => String(it.invoiceNumber||'').trim() && String(it.itemName||'').trim());
+              resolve(processed);
+            }
+          } catch (err) { reject(err); }
+        };
+        reader.onerror = () => reject(new Error('檔案讀取失敗(FileReader)'));
+        reader.readAsArrayBuffer(file);
+      });
+
+      // 檢查單筆明細是否符合任一參考規則
+      const checkItemMatch = (item, sellerId, refData) => {
+        const itemSellerId = String(sellerId).trim();
+        const itemName = String(item.name || item.itemName || '').trim();
+
+        const yesRefs  = refData.filter(r => r.deductable === 'Yes');
+        const noRefs   = refData.filter(r => r.deductable === 'No');
+        const passRefs = refData.filter(r => r.deductable === 'Pass');
+
+        let isYes = false;
+        let isNo = false;
+        let isPass = false;
+
+        // 檢查是否符合可扣抵 (Keyword Only)
+        isYes = yesRefs.some(r => {
+          const rs = String(r.sellerId||'').trim();
+          const rk = (r.keyword||'').toString();
+          const sellerMatch = rs && rs === itemSellerId;
+          const keywordMatch = rk && itemName.includes(rk);
+          
+          if (rs && rk) return sellerMatch && keywordMatch;
+          if (rs && !rk) return false; // 純統編規則不影響明細狀態
+          if (!rs && rk) return keywordMatch;
+          return false;
+        });
+
+        // 檢查是否符合不可扣抵 (Keyword Only)
+        isNo = noRefs.some(r => {
+          const rs = String(r.sellerId||'').trim();
+          const rk = (r.keyword||'').toString();
+          const sellerMatch = rs && rs === itemSellerId;
+          const keywordMatch = rk && itemName.includes(rk);
+          
+          if (rs && rk) return sellerMatch || keywordMatch;
+          if (rs && !rk) return false; // 純統編規則不影響明細狀態
+          if (!rs && rk) return keywordMatch;
+          return false;
+        });
+
+        // 檢查是否符合模糊項目 (Keyword Only)
+        if (!isYes && !isNo) {
+            isPass = passRefs.some(r => {
+                const rs = String(r.sellerId||'').trim();
+                const rk = (r.keyword||'').toString();
+                const sellerMatch = rs && rs === itemSellerId;
+                const keywordMatch = rk && itemName.includes(rk);
+                
+                if (rs && rk) return sellerMatch || keywordMatch;
+                if (rs && !rk) return false; // 純統編規則不影響明細狀態
+                if (!rs && rk) return keywordMatch;
+                return false;
+            });
+        }
+
+        return { isYes, isNo, isPass };
+      };
+
+      // 【新增】判斷賣方統編是否為可扣抵賣方 (純統編規則)
+      const isSellerIdDeductible = (sellerId, refData) => {
+          if (!sellerId) return false;
+          return refData.some(r => r.deductable === 'Yes' && r.sellerId === sellerId.trim() && !r.keyword);
+      };
+
+      // 【修改】判斷賣方統編是否為不可扣抵賣方 (純統編規則)
+      const isSellerIdNonDeductible = (sellerId, refData) => {
+          if (!sellerId) return false;
+          return refData.some(r => r.deductable === 'No' && r.sellerId === sellerId.trim() && !r.keyword);
+      };
+
+      // 輔助函數：添加輔助明細行 (載具/備註)
+      const injectAuxiliaryItems = (rawItems, inv) => {
+          // 輔助項目的資料只用於匯出，不應加入到 items 列表中以免影響顯示和審核邏輯
+          // 這裡我們只返回原始的 rawItems，讓 consolidatedItems 只處理真正的商品明細
+          
+          // *但是，如果我們需要在 Step 4/5 頁面的商品明細列表中顯示它，我們需要將其加入。
+          // 為了滿足「移除紅框處重複的載具號碼與備註、NA 標註」的要求，
+          // 我們只在頁面頂部的專門區塊顯示 U/V 欄資訊，而在明細列表 (items) 中不加入輔助項目。
+          
+          // 修正邏輯：不再將 U/V 欄資訊作為 items 注入。
+          return rawItems;
+      }
+      
+      const searchRefData = async (customerIdParam, invoicesArg, detailsArg) => {
+        const cid = customerIdParam || companyId;
+        setStep(2);
+        setInfo('正在載入參考資料...');
+
+        const invoices = Array.isArray(invoicesArg) ? invoicesArg : invoiceData;
+        const details  = Array.isArray(detailsArg)  ? detailsArg  : invoiceDetailsData;
+
+        let fetched = null;
+        if (apiKey) {
+          try {
+            fetched = await fetchRefDataFromN8n({ apiKey, customerId: cid });
+            if (fetched) { setFixedRefData(fetched); setN8nGetStatus('ok'); }
+            else { setN8nGetStatus('fail'); setInfo(''); }
+          } catch (e) {
+            setN8nGetStatus('fail'); setInfo('');
+          }
+        } else {
+          setN8nGetStatus('skip'); setInfo('');
+        }
+        const useList = fetched || fixedRefData;
+
+        const anyCidEmpty = (useList && useList.length > 0) &&
+                            useList.some(r => !String(r.customerId || '').trim());
+        if (anyCidEmpty) {
+          const cleaned = invoices.map(inv => {
+            let rawItems = details
+              .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
+              .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex, isAuxiliary: d.isAuxiliary }))
+              .filter(it => it.name);
+
+            // 修正：不再將 U/V 欄資訊作為 items 注入。
+            // rawItems = injectAuxiliaryItems(rawItems, inv);
+
+            return { ...inv, buyerNote:'待查', isChecked: 0, items:rawItems, consolidatedItems:consolidateItems(rawItems) };
+          });
+          setInvoiceData(cleaned);
+          setPendingReviews(cleaned);
+          setStep(4);
+          return;
+        }
+
+        const data = (useList || []).filter(r => r.customerId === cid);
+        if (!data || data.length === 0) {
+          const cleaned = invoices.map(inv => {
+            let rawItems = details
+              .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
+              .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex, isAuxiliary: d.isAuxiliary }))
+              .filter(it => it.name);
+            
+            // 修正：不再將 U/V 欄資訊作為 items 注入。
+            // rawItems = injectAuxiliaryItems(rawItems, inv);
+
+            return { ...inv, buyerNote:'待查', isChecked: 0, items:rawItems, consolidatedItems:consolidateItems(rawItems) };
+          });
+          setInvoiceData(cleaned);
+          setPendingReviews(cleaned);
+          setStep(4);
+        } else {
+          const sorted = [...data].sort((a,b)=>{
+            const av = a.deductable === 'No' ? 0 : a.deductable === 'Pass' ? 1 : 2; 
+            const bv = b.deductable === 'No' ? 0 : b.deductable === 'Pass' ? 1 : 2;
+            return av - bv;
+          });
+          setRefData(sorted);
+          setInfo('');
+        }
+      };
+
+      const startCleaningWithRef = () => { initialDataCleaning(refData); };
+
+      const initialDataCleaning = (useRef) => {
+        setStep(3);
+        setProgress(0);
+        const interval = setInterval(() => {
+          setProgress(prev => {
+            if (prev >= 100) {
+              clearInterval(interval);
+              const cleaned = invoiceData.map(inv => {
+                let rawItems = invoiceDetailsData
+                  .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
+                  .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex, isAuxiliary: d.isAuxiliary }))
+                  .filter(it => it.name);
+                
+                // 修正：不再將 U/V 欄資訊作為 items 注入。
+                // rawItems = injectAuxiliaryItems(rawItems, inv);
+                
+                // 計算每個明細的【明細】符合狀態 (排除輔助項目)
+                const checkableItems = rawItems.filter(item => !item.isAuxiliary);
+                const itemStatuses = checkableItems.map(item => checkItemMatch(item, inv.sellerId, useRef));
+
+                // 將狀態合併回明細項目中
+                let itemStatusIndex = 0;
+                const itemsWithStatus = rawItems.map((item) => {
+                    if (item.isAuxiliary) return item; // 輔助項目直接返回
+                    return {
+                        ...item,
+                        ...itemStatuses[itemStatusIndex++],
+                    };
+                });
+
+                // 統計數量 (只計算非輔助項目)
+                const totalItems = checkableItems.length;
+                const matchNoItems  = itemsWithStatus.filter(s => !s.isAuxiliary && s.isNo).length; 
+                const matchYesItems = itemsWithStatus.filter(s => !s.isAuxiliary && s.isYes).length;
+                const noMatchItems  = itemsWithStatus.filter(s => !s.isAuxiliary && !s.isYes && !s.isNo && !s.isPass).length;
+                
+                // 檢查是否有純賣方統編的可扣抵/不可扣抵規則
+                const isSellerIdNoRule  = isSellerIdNonDeductible(inv.sellerId, useRef);
+                const isSellerIdYesRule = isSellerIdDeductible(inv.sellerId, useRef);
+
+                // *********** 發票自動審核邏輯 (要求 1 - 匯入 Excel 階段) ***********
+                let buyerNote = '待查';
+                let isChecked = 0; // 預設待審核
+
+                if (totalItems === 0) {
+                   buyerNote = '待查';
+                } else if (matchNoItems > 0) {
+                    // 1. 同一張發票內只要有一個不可扣項目就自動更新 buyerNote 為不可扣
+                    buyerNote = '不得抵扣之進貨及費用';
+                    // 若所有品項都是不可扣則 isChecked = 1，否則 isChecked = 0
+                    if (matchNoItems === totalItems) {
+                        isChecked = 1;
+                    } else {
+                        isChecked = 0;
+                    }
+                } else if (isSellerIdNoRule) {
+                    // 2. 發票的賣方統編為不可扣抵賣方，更新 buyerNote 為不可扣
+                    buyerNote = '不得抵扣之進貨及費用';
+                    // 若明細中有未確認的黃底項目則 isChecked=0，否則 isChecked=1
+                    isChecked = (noMatchItems === 0) ? 1 : 0;
+                } else if (isSellerIdYesRule) {
+                    // 3. 發票的賣方統編為可扣抵賣方，更新 buyerNote 為可扣
+                    buyerNote = '';
+                    // 若明細中有未確認的黃底項目則 isChecked=0，否則 isChecked=1
+                    isChecked = (noMatchItems === 0) ? 1 : 0;
+                } else if (noMatchItems === 0) {
+                    // 4. 同一張發票內只有可扣和略過的項目時自動更新 buyerNote 為可扣
+                    buyerNote = ''; 
+                    isChecked = 1;
+                } else { 
+                    // 5. 其餘所有發票都要進入 Step 4 由人工審核
+                    buyerNote = '待查';
+                    isChecked = 0;
+                }
+                // **********************************
+
+                return { 
+                  ...inv, 
+                  buyerNote, 
+                  isChecked, // 包含 isChecked 狀態
+                  items: itemsWithStatus, 
+                  consolidatedItems: consolidateItems(itemsWithStatus) 
+                };
+              });
+
+              setInvoiceData(cleaned);
+              // 篩選出所有 buyerNote='待查' 的發票進入人工審核 (isChecked=0 的待審發票)
+              const pending = cleaned.filter(i => i.buyerNote === '待查');
+              setPendingReviews(pending);
+              setStep(pending.length ? 4 : 5);
+              return 100;
+            }
+            return prev + 12.5;
+          });
+        }, 120);
+      };
+
+      // 移除內部的 reprocessPendingInvoices 呼叫
+      const addKeywordsToRefData = (keywords, deductable, sellerId) => {
+        const list = (keywords||'').split(/[,，]/).map(s=>s.trim()).filter(Boolean);
+        // 針對純統編判斷的處理：如果 keywords 為空但 sellerId 存在，則新增一筆純統編規則
+        const newRefs = list.length > 0 
+          ? list.map(keyword => ({ customerId: companyId, deductable, sellerId: sellerId||'', keyword }))
+          : (sellerId ? [{ customerId: companyId, deductable, sellerId, keyword: '' }] : []);
+        
+        setFixedRefData(prev => [...prev, ...newRefs]);
+        const updated = [...refData, ...newRefs];
+        setRefData(updated);
+        setNewlyAddedRefData(prev => [...prev, ...newRefs]);
+        return newRefs;
+      };
+      
+      // 根據最新規則重新處理待審核發票（用於 Step 4 新增規則時觸發）
+      const reprocessPendingInvoices = (invoiceList, currentRefData, currentManualInvNo) => {
+        
+        // 確保重新審核的目標列表
+        const targetList = invoiceList || invoiceData;
+        
+        const reprocessed = targetList.map(inv => {
+          
+          // 【核心修正 1】如果發票是剛剛手動操作的發票，且 isChecked=1 (或已在外部被標記為 1)，直接返回。
+          if (inv.isChecked === 1 && inv.invoiceNumber !== currentManualInvNo) {
+            return inv; 
+          }
+          
+          // 如果是正在被手動操作的發票，但現在是被作為背景重新計算，則跳過。
+          if (inv.invoiceNumber === currentManualInvNo) {
+              console.log(`reprocess: 跳過手動審核中的發票 ${inv.invoiceNumber}`);
+              return inv;
+          }
+
+          // 只處理 '待查' 且 isChecked=0 的發票
+          if (inv.buyerNote !== '待查' || inv.isChecked !== 0) return inv;
+          
+          let rawItems = invoiceDetailsData
+            .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
+            .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex, isAuxiliary: d.isAuxiliary }))
+            .filter(it => it.name);
+
+          // 修正：不再將 U/V 欄資訊作為 items 注入。
+          // rawItems = injectAuxiliaryItems(rawItems, inv);
+          
+          // 計算每個明細的【明細】符合狀態 (排除輔助項目)
+          const checkableItems = rawItems.filter(item => !item.isAuxiliary);
+          const itemStatuses = checkableItems.map(item => checkItemMatch(item, inv.sellerId, currentRefData));
+
+          // 將狀態合併回明細項目中
+          let itemStatusIndex = 0;
+          const itemsWithStatus = rawItems.map((item) => {
+              if (item.isAuxiliary) return item; // 輔助項目直接返回
+              return {
+                  ...item,
+                  ...itemStatuses[itemStatusIndex++],
+              };
+          });
+
+
+          const totalItems = checkableItems.length;
+          const matchNoItems  = itemsWithStatus.filter(s => !s.isAuxiliary && s.isNo).length;
+          const noMatchItems  = itemsWithStatus.filter(s => !s.isAuxiliary && !s.isYes && !s.isNo && !s.isPass).length;
+          
+          // 檢查是否有純賣方統編的不可扣抵規則
+          const isSellerIdNoRule  = isSellerIdNonDeductible(inv.sellerId, currentRefData);
+          const isSellerIdYesRule = isSellerIdDeductible(inv.sellerId, currentRefData);
+
+
+          // *********** 發票自動審核邏輯 (應用最終規則) ***********
+          let buyerNote = '待查';
+          let isChecked = 0; // 預設待審核
+          
+          if (totalItems === 0) {
+             buyerNote = '待查';
+          } else if (matchNoItems > 0) {
+              // 1. 若有任一筆明細為不可扣抵，則該張發票註記為不可扣抵 (明細優先)
+              buyerNote = '不得抵扣之進貨及費用';
+              if (matchNoItems === totalItems) {
+                  isChecked = 1;
+              } else {
+                  isChecked = 0;
+              }
+          } else if (isSellerIdNoRule) {
+              // 2. 若明細無不可扣抵，但賣方統編有不可扣抵規則
+              buyerNote = '不得抵扣之進貨及費用';
+              isChecked = (noMatchItems === 0) ? 1 : 0;
+          } else if (isSellerIdYesRule) {
+              // 3. 若明細無不可扣抵，但賣方統編有可扣抵規則
+              buyerNote = '';
+              isChecked = (noMatchItems === 0) ? 1 : 0;
+          } else if (noMatchItems === 0) {
+              // 4. 若所有發票明細皆為可扣抵或略過，則註記為可扣抵
+              buyerNote = ''; 
+              isChecked = 1;
+          } else { 
+              // 5. 其餘不符上述條件，則繼續 Step 4 人工審核
+              buyerNote = '待查';
+              isChecked = 0;
+          }
+          // **********************************
+          
+          // 【埋設 Log 方便排查】
+          console.log(`reprocess: 發票 ${inv.invoiceNumber} 重新判斷結果: buyerNote=${buyerNote}, isChecked=${isChecked}`);
+
+
+          return { 
+            ...inv, 
+            buyerNote, 
+            isChecked,
+            items: itemsWithStatus, 
+            consolidatedItems: consolidateItems(itemsWithStatus) 
+          };
+        });
+        
+        // 由於我們在 handleReviewDecision 中處理了狀態的合併，這裡只需要返回 reprocessed
+        return reprocessed;
+      };
+      
+      const handleReviewDecision = (decision) => {
+        const current = pendingReviews[currentReviewIndex];
+        const currentInvNo = current.invoiceNumber; // 鎖定當前發票號碼
+        const newBuyerNote = decision === 'deductible' ? '' : '不得抵扣之進貨及費用';
+        const isKeywordAdded = newKeyword.trim();
+        const isPassKeywordSet = tempPassKeywords[currentInvNo] && tempPassKeywords[currentInvNo].length > 0;
+        
+        // 判斷是否為純統編判斷
+        const isSellerIdOnlyRule = useSellerIdOnly && !isKeywordAdded;
+
+        let currentRefData = refData;
+        const newRefs = [];
+
+        // 檢查是否處於「新增條件模式」
+        const isAddingRule = isKeywordAdded || isSellerIdOnlyRule || isPassKeywordSet;
+        
+        // 步驟 1: 處理關鍵字新增 / 純統編新增 / Pass 規則
+        if (isAddingRule) {
+          // ... (新增規則邏輯不變)
+          
+          // 1.1 處理 Yes/No 關鍵字或統編規則
+          if (isKeywordAdded || isSellerIdOnlyRule) {
+            const sellerId = isSellerIdOnlyRule || includeSellerID ? current.sellerId : '';
+            const deductable = decision === 'deductible' ? 'Yes' : 'No';
+            const keywords = isSellerIdOnlyRule ? '' : newKeyword;
+            
+            const addedRefs = addKeywordsToRefData(keywords, deductable, sellerId); 
+            newRefs.push(...addedRefs);
+          } 
+          
+          // 1.2 處理 Pass 規則
+          if (isPassKeywordSet) {
+            const passRules = tempPassKeywords[currentInvNo].map(({ keyword, sellerId }) => ({
+              customerId: companyId, deductable: 'Pass', sellerId, keyword
+            }));
+            
+            setNewlyAddedRefData(prev => [...prev, ...passRules]);
+            setRefData(prev => [...prev, ...passRules]);
+            newRefs.push(...passRules);
+            
+            // 清空當前發票的暫存 Pass 規則
+            setTempPassKeywords(prev => {
+              const newState = { ...prev };
+              delete newState[currentInvNo];
+              return newState;
+            });
+          }
+
+          // 清空輸入欄位狀態
+          setNewKeyword(''); 
+          setIncludeSellerID(false);
+          setUseSellerIdOnly(false);
+        }
+        
+        // 步驟 2: 處理發票狀態更新 (手動標記優先於自動判斷) & isChecked = 1
+        const updatedCurrentInv = { ...current, buyerNote: newBuyerNote, isChecked: 1 };
+        
+        let finalInvoiceData = [];
+        
+        if (isAddingRule) {
+            // 【模式 2: 新增規則並審核】: 檢查其他待審發票
+            const updatedRefData = [...refData, ...newRefs];
+            
+            // 找出所有非當前發票的列表
+            const otherInvoices = invoiceData.filter(inv => inv.invoiceNumber !== currentInvNo);
+
+            // 對其他待審核發票進行重新審核 (使用最新的 RefData)
+            const reprocessedOtherInvoices = reprocessPendingInvoices(otherInvoices, updatedRefData, null);
+
+            // 將手動審核結果與重新審核的結果合併
+            finalInvoiceData = invoiceData.map(inv => {
+                if (inv.invoiceNumber === currentInvNo) {
+                    return updatedCurrentInv;
+                }
+                const reprocessedInv = reprocessedOtherInvoices.find(r => r.invoiceNumber === inv.invoiceNumber);
+                return reprocessedInv || inv; // 使用重新審核後的結果，否則保持原狀
+            });
+
+        } else {
+            // 【模式 1: 僅手動審核/不新增規則】: 僅更新當前發票
+             finalInvoiceData = invoiceData.map(inv =>
+                inv.invoiceNumber === currentInvNo ? updatedCurrentInv : inv
+            );
+        }
+
+        setInvoiceData(finalInvoiceData);
+        
+        // 【埋設 Log 方便排查】
+        console.log(`handleReviewDecision: 發票 ${currentInvNo} 手動審核結果: buyerNote=${newBuyerNote}, isChecked=1`);
+
+        // 步驟 4: 更新 pendingReviews 列表 (基於 finalInvoiceData)
+        const stillPending = finalInvoiceData.filter(i => i.buyerNote === '待查');
+        
+        if (!stillPending.length) { 
+            setPendingReviews([]); 
+            setStep(5); 
+            setCurrentReviewIndex(0); 
+        } else {
+            setPendingReviews(stillPending);
+            const idx = stillPending.findIndex(i => i.invoiceNumber === currentInvNo);
+            let newIndex = currentReviewIndex; 
+
+            if (idx !== -1) {
+                // 如果當前發票因為新規則而變成非待查，則 index 維持不變，會自動跳到下一筆
+            } else if (newIndex >= stillPending.length) {
+                newIndex = Math.max(0, stillPending.length - 1);
+            }
+            setCurrentReviewIndex(newIndex);
+        }
+      };
+      
+      // 開啟 Pass 模態框
+      const openPassModal = (item, invoice) => {
+          const defaultKeyword = item.name; 
+          setCurrentPassItem({
+              name: item.name,
+              sellerId: invoice.sellerId,
+              invoiceNumber: invoice.invoiceNumber,
+              consolidatedName: item.name, 
+          });
+          setPassKeywordInput(defaultKeyword); 
+          // 重置 Pass 模態框的賣方統編勾選狀態
+          setCurrentPassItem(p => ({...p, includeSellerID: false})); 
+          setShowPassModal(true);
+      };
+
+      // 處理 Pass 模態框確認 (即時 UI 標記，不觸發重新判斷/跳轉)
+      const handleConfirmPassKeyword = () => {
+          if (!passKeywordInput.trim() || !currentPassItem) return;
+
+          const { invoiceNumber, consolidatedName, sellerId, includeSellerID } = currentPassItem;
+          
+          // 步驟 1: 暫存規則
+          const keywordList = passKeywordInput.split(/[,，]/).map(s=>s.trim()).filter(Boolean);
+
+          const newPassRules = keywordList.map(keyword => ({ 
+            keyword: keyword, 
+            sellerId: includeSellerID ? sellerId : '', 
+          }));
+          
+          // 將規則暫存到 tempPassKeywords
+          setTempPassKeywords(prev => ({
+            ...prev,
+            [invoiceNumber]: [...(prev[invoiceNumber] || []), ...newPassRules]
+          }));
+          
+          // 步驟 2: 更新當前發票的 consolidatedItems，即時顯示灰底
+          setInvoiceData(prev => prev.map(inv => {
+            if (inv.invoiceNumber === invoiceNumber) {
+              const updatedItems = inv.items.map(rawItem => {
+                // 檢查是否符合任一新的 Pass 關鍵字
+                const isMatch = keywordList.some(k => rawItem.name.includes(k));
+                if (isMatch) {
+                    const currentStatus = checkItemMatch(rawItem, inv.sellerId, refData);
+                    if (currentStatus.isYes || currentStatus.isNo) {
+                        return rawItem; // 如果已經是 Yes/No，則忽略手動 Pass
+                    }
+                    return { ...rawItem, isPass: true }; // 標記原始明細
+                }
+                return rawItem;
+              });
+
+              // 重新計算 consolidatedItems
+              const updatedConsolidated = consolidateItems(updatedItems);
+              return { ...inv, items: updatedItems, consolidatedItems: updatedConsolidated };
+            }
+            return inv;
+          }));
+          
+          // 步驟 3: 清理並關閉模態框
+          setPassKeywordInput('');
+          setCurrentPassItem(null);
+          setShowPassModal(false);
+      };
+      
+      // openEditModal 函式
+      const openEditModal = (invoice) => {
+        setEditingInvoice(invoice);
+        setNewKeyword('');
+        setEditIncludeSellerID(false);
+        setEditUseSellerIdOnly(false); // 重設狀態
+        setShowEditModal(true);
+      };
+
+      const closeEditModal = () => { 
+        setShowEditModal(false); 
+        setEditingInvoice(null); 
+        setNewKeyword(''); 
+        setEditIncludeSellerID(false); 
+        setEditUseSellerIdOnly(false); // 重設狀態
+      };
+      
+      const handleEditDecision = (decision) => {
+        if (!editingInvoice) return;
+        
+        const currentInv = editingInvoice;
+        const currentInvNo = currentInv.invoiceNumber;
+        const newBuyerNote = decision === 'deductible' ? '' : '不得抵扣之進貨及費用';
+        const isKeywordAdded = newKeyword.trim();
+        const isPassKeywordSet = tempPassKeywords[currentInvNo] && tempPassKeywords[currentInvNo].length > 0;
+        
+        // 判斷是否為純統編判斷
+        const isSellerIdOnlyRule = editUseSellerIdOnly && !isKeywordAdded;
+
+        let currentRefData = refData;
+        const newRefs = [];
+
+        // 檢查是否處於「新增條件模式」
+        const isAddingRule = isKeywordAdded || isSellerIdOnlyRule || isPassKeywordSet;
+
+        // 步驟 1: 處理關鍵字新增 (Yes 或 No) / 純統編新增 / Pass 規則
+        if (isAddingRule) {
+            // 1.1 處理 Yes/No 關鍵字或統編規則
+            if (isKeywordAdded || isSellerIdOnlyRule) {
+                const sellerId = isSellerIdOnlyRule || editIncludeSellerID ? currentInv.sellerId : '';
+                const deductable = decision === 'deductible' ? 'Yes' : 'No';
+                const keywords = isSellerIdOnlyRule ? '' : newKeyword;
+
+                const addedRefs = addKeywordsToRefData(keywords, deductable, sellerId);
+                newRefs.push(...addedRefs);
+            } 
+            
+            // 1.2 處理 Pass 規則
+            if (isPassKeywordSet) {
+                const passRules = tempPassKeywords[currentInvNo].map(({ keyword, sellerId }) => ({
+                    customerId: companyId, deductable: 'Pass', sellerId, keyword
+                }));
+                
+                setNewlyAddedRefData(prev => [...prev, ...passRules]);
+                setRefData(prev => [...prev, ...passRules]);
+                newRefs.push(...passRules);
+                
+                setTempPassKeywords(prev => {
+                    const newState = { ...prev };
+                    delete newState[currentInvNo];
+                    return newState;
+                });
+            }
+
+            // 清空輸入欄位狀態
+            setNewKeyword(''); 
+            setEditIncludeSellerID(false); 
+            setEditUseSellerIdOnly(false);
+        }
+
+        // 步驟 2: 更新當前發票狀態 & isChecked = 1 (手動編輯/確認完成，一律設為 1)
+        const updatedCurrentInv = { ...currentInv, buyerNote: newBuyerNote, isChecked: 1 };
+        
+        // 【埋設 Log 方便排查】
+        console.log(`handleEditDecision: 發票 ${currentInvNo} 手動審核結果: buyerNote=${newBuyerNote}, isChecked=1`);
+
+        let finalInvoiceData = [];
+
+        // 步驟 3: 執行流程 (處理所有 isChecked=0 發票)
+        if (isAddingRule) {
+            // 【模式 2: 新增規則並審核】: 重新檢查所有 isChecked=0 發票 (要求 2)
+            const updatedRefData = [...refData, ...newRefs];
+            
+            // 找出所有非當前發票的列表
+            const otherInvoices = invoiceData.filter(inv => inv.invoiceNumber !== currentInvNo);
+
+            // 對其他待審核發票進行重新審核 (使用最新的 RefData)
+            const reprocessedOtherInvoices = reprocessPendingInvoices(otherInvoices, updatedRefData, null);
+
+            // 將手動審核結果與重新審核的結果合併
+            finalInvoiceData = invoiceData.map(inv => {
+                if (inv.invoiceNumber === currentInvNo) {
+                    // 重新計算當前發票的明細狀態（為了顯示正確的明細顏色），但鎖定 isChecked 和 buyerNote
+                    let rawItems = invoiceDetailsData
+                        .filter(d => String(d.invoiceNumber).trim() === String(inv.invoiceNumber).trim())
+                        .map(d => ({ name: d.itemName, amount: d.amount, originalIndex: d.originalIndex, isAuxiliary: d.isAuxiliary }))
+                        .filter(it => it.name);
+
+                    // 修正：不再將 U/V 欄資訊作為 items 注入。
+                    // rawItems = injectAuxiliaryItems(rawItems, inv);
+
+                    const itemsWithStatus = rawItems.map(item => ({...item, ...checkItemMatch(item, inv.sellerId, updatedRefData)}));
+                    const consolidatedItemsWithStatus = consolidateItems(itemsWithStatus);
+                    
+                    return { 
+                        ...updatedCurrentInv, // 繼承 isChecked=1, buyerNote
+                        items: itemsWithStatus, 
+                        consolidatedItems: consolidatedItemsWithStatus 
+                    };
+                }
+                const reprocessedInv = reprocessedOtherInvoices.find(r => r.invoiceNumber === inv.invoiceNumber);
+                return reprocessedInv || inv; 
+            });
+            
+            setInvoiceData(finalInvoiceData);
+            
+            // 更新 pendingReviews 列表 (基於 finalInvoiceData)
+            const stillPending = finalInvoiceData.filter(i => i.buyerNote === '待查');
+            setPendingReviews(stillPending);
+        } else {
+            // 【模式 1: 僅手動審核】
+            finalInvoiceData = invoiceData.map(inv =>
+                inv.invoiceNumber === currentInvNo ? updatedCurrentInv : inv
+            );
+            setInvoiceData(finalInvoiceData);
+            
+            // 更新 pendingReviews 列表 (基於 finalInvoiceData)
+            const stillPending = finalInvoiceData.filter(i => i.buyerNote === '待查');
+            setPendingReviews(stillPending);
+        }
+
+        closeEditModal();
+      };
+
+
+      const handleConfirmCompletion = async () => {
+        setStep(6);
+        
+        // 確保所有暫存的 Pass 規則都被合併到 newlyAddedRefData
+        const allTempPassRules = Object.values(tempPassKeywords).flat().map(({ keyword, sellerId }) => ({
+            customerId: companyId, deductable: 'Pass', sellerId, keyword
+        }));
+
+        const finalRules = [...newlyAddedRefData, ...allTempPassRules];
+        
+        if (!finalRules.length) { setN8nAddStatus('ok'); return; }
+        if (!apiKey) { setN8nAddStatus('fail'); setInfo(''); return; }
+        try {
+          await addRefRuleToN8n({ apiKey, customerId: companyId, rules: finalRules });
+          setN8nAddStatus('ok');
+          setTempPassKeywords({}); // 清空暫存
+        } catch (e) {
+          setN8nAddStatus('fail');
+          setInfo('新增參考資料傳送失敗。');
+        }
+      };
+
+      const retrySendToN8n = async () => {
+        const allTempPassRules = Object.values(tempPassKeywords).flat().map(({ keyword, sellerId }) => ({
+            customerId: companyId, deductable: 'Pass', sellerId, keyword
+        }));
+        const finalRules = [...newlyAddedRefData, ...allTempPassRules];
+
+        try {
+          await addRefRuleToN8n({ apiKey, customerId: companyId, rules: finalRules });
+          setN8nAddStatus('ok');
+          setInfo('已成功重新傳送。');
+          setTempPassKeywords({}); // 清空暫存
+        } catch (e) {
+          setN8nAddStatus('fail');
+          setInfo('重送失敗。');
+        }
+      };
+      
+      // 【優化 3, 4, 5】調整下載邏輯以新增輔助明細列
+      const downloadResults = async () => {
+        try {
+          if (!window.XLSX) throw new Error('XLSX 函式庫未可用');
+          const wb = window.XLSX.utils.book_new();
+          
+          // 處理 Invoice 工作表 (不變)
+          const updatedInvoiceRows = originalInvoiceData.map(inv => {
+            const updated = invoiceData.find(x => x.invoiceNumber === inv.invoiceNumber);
+            if (updated) {
+              const row = [...inv.originalRow];
+              row[1] = updated.buyerNote;
+              return row;
+            }
+            return inv.originalRow;
+          });
+
+          const invoiceHeaders = ["發票號碼","買受人註記","格式代號","發票狀態","發票日期","買方統一編號","買方名稱","賣方統一編號","賣方名稱","寄送日期","銷售額合計","應稅銷售額","零稅銷售額","免稅銷售額","營業稅","總計","課稅別","匯率","載具類別編號","載具號碼1","載具號碼2","總備註","開立確認時間","最後異動時間","MIG訊息類別","傳送方統編","傳送方名稱"];
+          const ws1 = window.XLSX.utils.aoa_to_sheet([invoiceHeaders, ...updatedInvoiceRows]);
+          window.XLSX.utils.book_append_sheet(wb, ws1, "Invoice");
+
+          // 處理 Invoice_details 工作表
+          const detailsHeaders = ["發票號碼","發票日期","序號","品名","數量","單位","單價","金額","單一欄位備註","相關號碼"];
+          const newDetailsRows = [];
+
+          const normalizeSequenceForExport = (rawValue, fallbackSequence) => {
+            const text = String(rawValue ?? '').trim();
+            if (!text) {
+              return { value: fallbackSequence + 1, lastNumericSequence: fallbackSequence };
+            }
+            if (text.toUpperCase() === 'ZZ') {
+              return { value: 'ZZ', lastNumericSequence: fallbackSequence };
+            }
+            const numeric = Number(text);
+            if (Number.isFinite(numeric)) {
+              return { value: numeric, lastNumericSequence: numeric };
+            }
+            return { value: text, lastNumericSequence: fallbackSequence };
+          };
+          
+          let lastInvoiceNumber = '';
+          let lastInvoiceDate = '';
+          let currentSequence = 0;
+          let currentInvoiceForSequence = '';
+
+          // 根據原始明細數據進行處理
+          originalDetailsData.forEach(d => {
+              const invoice = invoiceData.find(inv => inv.invoiceNumber === d.invoiceNumber);
+              
+              // 換發票時，序號重新從該發票自己的數列開始累計，避免跨發票污染
+              if (d.invoiceNumber !== currentInvoiceForSequence) {
+                  currentInvoiceForSequence = d.invoiceNumber;
+                  currentSequence = 0;
+              }
+
+              // 1. 處理原始明細行
+              const originalRow = [...d.originalRow];
+              // 確保發票號碼和日期被正確更新以便後續插入
+              if (originalRow[0]) lastInvoiceNumber = originalRow[0];
+              if (originalRow[1]) lastInvoiceDate = originalRow[1];
+
+              // 更新序號：保留 ZZ，避免被 Number('ZZ') 轉成 NaN
+              const sequenceInfo = normalizeSequenceForExport(originalRow[2], currentSequence);
+              originalRow[2] = sequenceInfo.value;
+              currentSequence = sequenceInfo.lastNumericSequence;
+              newDetailsRows.push(originalRow);
+
+              // 2. 檢查是否需要插入輔助明細 (只在該發票的明細結束時檢查一次)
+              const nextDetail = originalDetailsData.find(nextD => nextD.rowIndex > d.rowIndex && nextD.invoiceNumber === d.invoiceNumber);
+              
+              if (!nextDetail && invoice) {
+                  const auxiliaryRows = [];
+                  
+                  // 2.1 U 欄 (載具號碼2)
+                  if (invoice.carrierNo2) {
+                      currentSequence += 1; // 序號 +1
+                      auxiliaryRows.push([
+                          lastInvoiceNumber, // 發票號碼
+                          lastInvoiceDate,   // 發票日期
+                          currentSequence,   // 序號 (前一個數字序號 +1)
+                          `載具號碼：${invoice.carrierNo2}`, // 品名
+                          0, // 數量
+                          '',// 單位
+                          0, // 單價
+                          0, // 金額
+                          '',// 單一欄位備註
+                          '' // 相關號碼
+                      ]);
+                  }
+                  
+                  // 2.2 V 欄 (總備註)
+                  if (invoice.totalNote) {
+                      currentSequence += 1; // 序號 +1
+                      auxiliaryRows.push([
+                          lastInvoiceNumber, // 發票號碼
+                          lastInvoiceDate,   // 發票日期
+                          currentSequence,   // 序號 (前一列或 U 欄列 +1)
+                          `總備註：${invoice.totalNote}`, // 品名
+                          0, // 數量
+                          '',// 單位
+                          0, // 單價
+                          0, // 金額
+                          '',// 單一欄位備註
+                          '' // 相關號碼
+                      ]);
+                  }
+                  
+                  newDetailsRows.push(...auxiliaryRows);
+              }
+          });
+
+          // 3. 檢查最後一張發票是否包含輔助資訊但沒有任何明細
+          invoiceData.forEach(inv => {
+              const hasOriginalDetails = originalDetailsData.some(d => d.invoiceNumber === inv.invoiceNumber);
+              if (!hasOriginalDetails && (inv.carrierNo2 || inv.totalNote)) {
+                  // 找到發票日期 (通常在原始 Invoice 資料的 row[4])
+                  const originalInv = originalInvoiceData.find(o => o.invoiceNumber === inv.invoiceNumber);
+                  const invDate = originalInv ? originalInv.originalRow[4] || '' : '';
+                  
+                  // 重設序列
+                  currentSequence = 0; 
+
+                  const auxiliaryRows = [];
+                  
+                  // U 欄 (載具號碼2)
+                  if (inv.carrierNo2) {
+                      currentSequence += 1;
+                      auxiliaryRows.push([
+                          inv.invoiceNumber, // 發票號碼
+                          invDate,           // 發票日期
+                          currentSequence,   // 序號 (從 1 開始)
+                          `載具號碼：${inv.carrierNo2}`, // 品名
+                          0, // 數量
+                          '',// 單位
+                          0, // 單價
+                          0, // 金額
+                          '',// 單一欄位備註
+                          '' // 相關號碼
+                      ]);
+                  }
+                  
+                  // V 欄 (總備註)
+                  if (inv.totalNote) {
+                      currentSequence += 1;
+                      auxiliaryRows.push([
+                          inv.invoiceNumber, // 發票號碼
+                          invDate,           // 發票日期
+                          currentSequence,   // 序號
+                          `總備註：${inv.totalNote}`, // 品名
+                          0, // 數量
+                          '',// 單位
+                          0, // 單價
+                          0, // 金額
+                          '',// 單一欄位備註
+                          '' // 相關號碼
+                      ]);
+                  }
+                  
+                  newDetailsRows.push(...auxiliaryRows);
+              }
+          });
+
+
+          const ws2 = window.XLSX.utils.aoa_to_sheet([detailsHeaders, ...newDetailsRows]);
+          window.XLSX.utils.book_append_sheet(wb, ws2, "Invoice_details");
+
+          const dateStr = new Date().toISOString().slice(0,10);
+          window.XLSX.writeFile(wb, `${companyId}_處理結果_${dateStr}.xlsx`);
+        } catch (e) {
+          alert('下載失敗：' + (e?.message || String(e)));
+        }
+      };
+
+      // 計算明細項目的背景色 (Step 4)
+      const getItemBgClass = (item) => {
+        // 【修正 2】輔助項目不應出現在此列表中，但以防萬一，如果出現，避免特殊樣式
+        if (item.isAuxiliary) return 'bg-white'; 
+
+        const hasNoMatch = item.consolidatedIsNo;
+        const hasNoRefMatch = item.consolidatedIsNoRefMatch;
+        const hasPassMatch = item.consolidatedIsPass;
+
+        // 獨立判斷邏輯：只看明細自身的 Yes/No/Pass 狀態
+        if (hasNoMatch) {
+            return 'bg-custom-red'; 
+        } else if (hasPassMatch) {
+            return 'isPassStyles'; 
+        } else if (hasNoRefMatch) {
+            return 'bg-custom-yellow'; 
+        }
+        return 'bg-white';
+      };
+
+      // 計算 Step 5 明細項目的背景色 (要求 6)
+      const getStep5ItemBgClass = (inv, item) => {
+        // 【修正 2】輔助項目不應出現在此列表中，但以防萬一，如果出現，避免特殊樣式
+        if (item.isAuxiliary) return 'bg-gray-50'; 
+
+        // Step 5 列表中，只有 isChecked=0 的發票需要特殊底色
+        if (inv.isChecked === 1) {
+             return 'bg-gray-50'; 
+        }
+        
+        // isChecked=0 的發票，明細顏色與 getItemBgClass 保持一致
+        const hasNoMatch = item.consolidatedIsNo;
+        const hasNoRefMatch = item.consolidatedIsNoRefMatch;
+        const hasPassMatch = item.consolidatedIsPass;
+
+        if (hasNoMatch) {
+            return 'bg-custom-red';
+        } else if (hasPassMatch) {
+            return 'isPassStyles';
+        } else if (hasNoRefMatch) {
+             return 'bg-custom-yellow';
+        }
+        
+        // isChecked=0 且明細為可扣抵時的底色
+        return 'bg-gray-50'; 
+      };
+      
+      // 計算 Step 5 編輯畫面明細項目的底色 (要求 7)
+      const getEditModalItemBgClass = (item) => {
+          // 【修正 2】輔助項目不應出現在此列表中，但以防萬一，如果出現，避免特殊樣式
+          if (item.isAuxiliary) return 'bg-white'; 
+
+          // 編輯畫面中，一律要依明細的規則條件顯示特殊底色 (要求 7)
+          const hasNoMatch = item.consolidatedIsNo;
+          const hasNoRefMatch = item.consolidatedIsNoRefMatch;
+          const hasPassMatch = item.consolidatedIsPass;
+
+          if (hasNoMatch) {
+              return 'bg-custom-red'; 
+          } else if (hasPassMatch) {
+              return 'isPassStyles'; 
+          } else if (hasNoRefMatch) {
+              return 'bg-custom-yellow'; 
+          }
+          return 'bg-white';
+      };
+      
+
+      // 判斷賣方統編底色樣式 (要求 7)
+      const getSellerIdBgClass = (sellerId, refData) => {
+          if (!sellerId) return '';
+          if (isSellerIdNonDeductible(sellerId, refData)) {
+              return 'seller-id-non-deductible';
+          }
+          if (isSellerIdDeductible(sellerId, refData)) {
+              return 'seller-id-deductible';
+          }
+          return '';
+      };
+
+      // 判斷 Step 5 列表中的賣方統編底色樣式 (要求 6)
+      const getStep5SellerIdBgClass = (inv, refData) => {
+          if (inv.isChecked === 1) return ''; // isChecked=1 則沒有特殊底色
+          return getSellerIdBgClass(inv.sellerId, refData);
+      };
+
+
+      // renderPassButton 邏輯：只在黃底（待查）時顯示
+      const renderPassButton = (item, invoice) => {
+        const isStep4 = step === 4 && pendingReviews.length > 0;
+        const isEditModal = showEditModal;
+        
+        if (!isStep4 && !isEditModal) return null;
+        
+        // 【修正 1】輔助項目不顯示略過按鈕
+        if (!item.consolidatedIsNoRefMatch || item.isAuxiliary) return null;
+
+        const currentInvoice = isStep4 ? pendingReviews[currentReviewIndex] : editingInvoice;
+        if (!currentInvoice) return null;
+
+        return (
+            <button onClick={(e)=>{
+                        e.stopPropagation();
+                        openPassModal(item, currentInvoice);
+                    }}
+                    className="w-5 h-5 rounded-full bg-gray-300 text-gray-700 text-xs font-bold flex items-center justify-center hover:bg-gray-400 transition-colors flex-shrink-0">
+                略
+            </button>
+        );
+      };
+
+      // 輔助函式：判斷 Pass 顏色類別 (Tailwind)
+      const getPassTextColorClass = (item) => {
+        return item.consolidatedIsPass ? "text-pass amount-pass" : "text-gray-800";
+      };
+
+
+      return (
+        <div className="max-w-6xl mx-auto px-2 py-4">
+          <div className="w-full bg-gray-200 h-1 mb-3 rounded">
+            <div className="bg-blue-500 h-1 transition-all duration-300 rounded" style={{ width: (step/6)*100 + '%' }} />
+          </div>
+
+          <div className="bg-white rounded-xl shadow-md py-3 px-8 work-container h-[95vh] flex flex-col">
+            {step===1 && (
+              <div className="text-center min-h-96">
+                <h2 className="text-lg font-bold mb-3">上傳發票檔案</h2>
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 mb-3">
+                  <input type="file" accept=".xlsx" onChange={handleFileUpload} className="hidden" id="file-upload" />
+                  <label htmlFor="file-upload" className="cursor-pointer">
+                    <div className="text-center">
+                      <p className="text-sm text-gray-500">點擊選擇檔案</p>
+                      <p className="text-xs text-gray-400 mt-2">支援 .xlsx 格式（僅支援財政部平台匯出檔案）</p>
+                    </div>
+                  </label>
+                </div>
+                {error && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 text-left">
+                    <p className="text-xs text-red-800">{error}</p>
+                  </div>
+                )}
+                {uploadedFile && !error && (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-left">
+                    <p className="text-xs text-green-800"><strong>已上傳：</strong>{uploadedFile.name}</p>
+                    <p className="text-xs text-green-600"><strong>公司統編：</strong>{companyId}</p>
+                    <p className="text-xs text-green-600"><strong>發票筆數：</strong>{invoiceData.length}</p>
+                    <p className="text-xs text-green-600"><strong>明細筆數：</strong>{invoiceDetailsData.length}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {step===2 && (
+              <div className="text-center min-h-96">
+                <h2 className="text-lg font-bold mb-3">參考資料</h2>
+                {info && <p className="text-sm text-gray-600 mb-4">{info}</p>}
+                {(refData && refData.length>0) ? (
+                  <div className="bg-gray-50 rounded-lg p-3 mb-4">
+                    <h3 className="text-sm font-semibold mb-3 text-center">已取得的參考資料（不可扣抵優先顯示）</h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs mx-auto">
+                        <thead>
+                          <tr className="border-b border-gray-300">
+                            <th className="text-center py-2 px-2 font-medium text-gray-700">類型</th>
+                            <th className="text-center py-2 px-2 font-medium text-gray-700">供應商統編</th>
+                            <th className="text-center py-2 px-2 font-medium text-gray-700">關鍵字</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {refData.map((ref, idx) => (
+                            <tr key={idx} className="border-b border-gray-200">
+                              <td className="py-2 px-2 text-center">
+                                <span className={`${ref.deductable==='Yes'?'bg-green-100 text-green-700': ref.deductable==='No'?'bg-red-100 text-red-700':'bg-gray-100 text-gray-700'} inline-flex px-2 py-1 text-xs font-medium rounded-full`}>
+                                  {ref.deductable==='Yes'?'可扣抵': ref.deductable==='No'?'不可扣抵':'略過'}
+                                </span>
+                              </td>
+                              <td className="py-2 px-2 text-gray-600 text-center">{ref.sellerId || '-'}</td>
+                              <td className="py-2 px-2 text-gray-600 text-center">{ref.keyword || '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="mt-4">
+                      <button onClick={startCleaningWithRef}
+                              className="bg-blue-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-600 transition-colors">
+                        開始清理
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-sm text-gray-500">未取得參考資料，已自動進入逐筆審核。</div>
+                )}
+              </div>
+            )}
+
+            {step===3 && (
+              <div className="text-center min-h-96">
+                <h2 className="text-lg font-bold mb-3">初步資料清理</h2>
+                <p className="text-sm text-gray-600 mb-4">正在根據參考資料進行自動判斷...</p>
+                <div className="mb-4">
+                  <div className="w-full bg-gray-200 rounded-full h-2 mb-3">
+                    <div className="bg-blue-500 h-2 rounded-full transition-all duration-300" style={{ width: progress + '%' }} />
+                  </div>
+                  <p className="text-sm text-gray-600">處理中... {progress}%</p>
+                </div>
+              </div>
+            )}
+
+            {step===4 && pendingReviews.length>0 && (
+              <div className="h-full flex flex-col">
+                <div className="h-8 flex justify-between items-center flex-shrink-0">
+                  <h2 className="text-lg font-bold">逐筆審核待查項目</h2>
+                  <p className="text-sm text-gray-600">進度：{currentReviewIndex+1} / {pendingReviews.length}</p>
+                </div>
+
+                {/* 【優化 3】移除固定的 height: '420px'，改用 flex-grow 和 flex-shrink-0 確保內容可滾動且底部固定 */}
+                <div className="bg-white border rounded-lg p-4 flex-1 overflow-y-auto min-h-0"> 
+                  <div className="grid grid-cols-2 gap-4 mb-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">發票號碼</label>
+                      <p className="text-sm font-semibold">{pendingReviews[currentReviewIndex].invoiceNumber}</p>
+                    </div>
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block text-xs font-medium text-gray-700">賣方資訊</label>
+                        {/* 【優化點 1】新增純統編判斷勾選框 */}
+                        <div className="flex items-center gap-2">
+                            <input type="checkbox" id="use-seller-id-only" checked={useSellerIdOnly} 
+                                   onChange={e=>setUseSellerIdOnly(e.target.checked)} className="w-3 h-3"/>
+                            <label htmlFor="use-seller-id-only" className="text-xs text-gray-700">直接使用賣方統編判斷</label>
+                        </div>
+                      </div>
+                      <p className={`text-sm font-semibold truncate ${getSellerIdBgClass(pendingReviews[currentReviewIndex].sellerId, refData)}`}
+                         title={`${pendingReviews[currentReviewIndex].sellerId} ${pendingReviews[currentReviewIndex].sellerName}`}>
+                        {pendingReviews[currentReviewIndex].sellerId} {pendingReviews[currentReviewIndex].sellerName}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {/* 【修正 1】Step 4 顯示 U/V 欄資訊 (頂部區塊，非明細) */}
+                  {(pendingReviews[currentReviewIndex].carrierNo2 || pendingReviews[currentReviewIndex].totalNote) && (
+                      <div className="text-xs text-gray-600 mt-2 mb-3 space-y-1 bg-gray-50 p-2 rounded border">
+                          {pendingReviews[currentReviewIndex].carrierNo2 && (
+                              <p className="font-medium">載具號碼：{pendingReviews[currentReviewIndex].carrierNo2}</p>
+                          )}
+                          {pendingReviews[currentReviewIndex].totalNote && (
+                              <p className="font-medium">總備註：{pendingReviews[currentReviewIndex].totalNote}</p>
+                          )}
+                      </div>
+                  )}
+
+                  <div className="mb-3">
+                    <label className="block text-xs font-medium text-gray-700 mb-2">發票商品明細</label>
+                    <div className="space-y-2 overflow-y-auto bg-gray-50 rounded p-2" style={{maxHeight:'200px'}}> {/* 限制明細高度 */}
+                      {/* 明細項目顯示邏輯：過濾掉 isAuxiliary 項目 */}
+                      {pendingReviews[currentReviewIndex].consolidatedItems?.filter(item => !item.isAuxiliary).map((item, idx) => {
+                        
+                        const isTempPassed = item.consolidatedIsPass || (
+                            tempPassKeywords[pendingReviews[currentReviewIndex].invoiceNumber] &&
+                            tempPassKeywords[pendingReviews[currentReviewIndex].invoiceNumber].some(rule => item.name.includes(rule.keyword))
+                        );
+
+                        const itemWithTempStatus = { ...item, consolidatedIsPass: isTempPassed };
+                        const bgColorClass = getItemBgClass(itemWithTempStatus);
+                        const passTextColorClass = getPassTextColorClass(itemWithTempStatus);
+                        
+                        return (
+                          <div key={idx} className={`${bgColorClass} p-2 rounded shadow-sm flex justify-between items-center`}>
+                            <span className={itemWithTempStatus.consolidatedIsPass ? "text-pass" : "text-gray-800"}>
+                              {item.name}{item.count>1?`（${item.count}項）`:''}
+                            </span>
+                            <div className="flex items-center gap-2">
+                                {/* 輔助項目已被過濾，因此無需檢查 item.isAuxiliary */}
+                                <span className={`text-xs text-gray-900 font-semibold ${itemWithTempStatus.consolidatedIsPass ? "amount-pass" : "text-gray-900"}`}>{$$formatAmount(item.amount)}元</span>
+                                {renderPassButton(item, pendingReviews[currentReviewIndex])}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="mb-3 flex-shrink-0">
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-xs font-medium text-gray-700">新增關鍵字（選填）</label>
+                      <div className="flex items-center gap-2">
+                        <input type="checkbox" id="include-seller-id" checked={includeSellerID} onChange={e=>setIncludeSellerID(e.target.checked)} className="w-3 h-3"/>
+                        <label htmlFor="include-seller-id" className="text-xs text-gray-700">加入賣方統編判斷</label>
+                      </div>
+                    </div>
+                    <input type="text" value={newKeyword} onChange={e=>{setNewKeyword(e.target.value); setUseSellerIdOnly(false);}}
+                      placeholder="輸入新的可扣抵 / 不可扣抵商品關鍵字，多個請用逗號分隔"
+                      className="w-full p-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"/>
+                  </div>
+                </div>
+
+                <div className="h-12 flex gap-3 items-center flex-shrink-0 mt-3"> {/* 增加 mt-3 確保間隔 */}
+                  <button onClick={()=>handleReviewDecision('deductible')}
+                          className="flex-1 bg-green-500 text-white px-4 py-2 text-xs rounded-lg hover:bg-green-600 transition-colors">
+                    可扣抵
+                  </button>
+                  <button onClick={()=>handleReviewDecision('non-deductible')}
+                          className="flex-1 bg-red-500 text-white px-4 py-2 text-xs rounded-lg hover:bg-red-600 transition-colors">
+                    不可扣抵
+                  </button>
+                </div>
+              </div>
+            )}
+            
+            {step===4 && pendingReviews.length===0 && (
+                <div className="text-center">
+                    <h2 className="text-lg font-bold mb-3">無待審核項目</h2>
+                    <button onClick={()=>setStep(5)} className="bg-blue-500 text-white px-4 py-2 text-sm rounded-lg">查看結果</button>
+                </div>
+            )}
+
+
+            {step===5 && (
+              <div className="flex-1 overflow-y-auto">
+                <h2 className="text-lg font-bold mb-2">處理結果檢視</h2>
+                <p className="text-sm text-gray-600 mb-4">點擊任一筆記錄可重新審核或修改結果</p>
+                {/* 埋設 Log 檢查 isChecked 狀態 */}
+                <p style={{display:'none'}}>{console.log("Step 5 發票列表狀態:", invoiceData.map(inv => ({ invNo: inv.invoiceNumber, isChecked: inv.isChecked, buyerNote: inv.buyerNote })))}</p>
+
+                <div className="space-y-3 mb-4">
+                  {invoiceData.map(inv => {
+                    const d = inv.buyerNote === '';
+                    const nd = inv.buyerNote === '不得抵扣之進貨及費用';
+                    
+                    let statusText = '待查';
+                    if (d) statusText = '可扣抵';
+                    else if (nd) statusText = '不可扣抵';
+                    
+                    // 賣方統編底色判斷
+                    const sellerIdBgClass = getStep5SellerIdBgClass(inv, refData);
+
+                    return (
+                      <div key={inv.invoiceNumber} className="bg-white border rounded-lg p-3 shadow-sm">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-3">
+                            <span className={`${d?'bg-green-100 text-green-800': nd?'bg-red-100 text-red-800':'bg-yellow-100 text-yellow-800'} inline-flex px-2 py-1 text-xs font-semibold rounded-full`}>
+                              {statusText}
+                            </span>
+                            <span className="text-sm font-semibold text-gray-900">{inv.invoiceNumber}</span>
+                            <span className="text-xs text-gray-500">
+                                <span className={sellerIdBgClass}>
+                                    {inv.sellerId}
+                                </span> - {inv.sellerName}
+                            </span>
+                          </div>
+                          <button onClick={()=>openEditModal(inv)} className="text-blue-600 hover:text-blue-900 font-medium text-xs">編輯</button>
+                        </div>
+                        
+                        {/* 【修正 1】Step 5 列表顯示 U/V 欄資訊 (頂部區塊，非明細) */}
+                        {(inv.carrierNo2 || inv.totalNote) && (
+                            <div className="text-xs text-gray-600 mb-2 space-y-1 bg-gray-50 p-2 rounded border">
+                                {inv.carrierNo2 && (
+                                    <p className="font-medium">載具號碼：{inv.carrierNo2}</p>
+                                )}
+                                {inv.totalNote && (
+                                    <p className="font-medium">總備註：{inv.totalNote}</p>
+                                )}
+                            </div>
+                        )}
+
+                        <div>
+                          <h4 className="text-xs font-medium text-gray-700 mb-1">商品明細：</h4>
+                          <div className="space-y-1">
+                            {/* 明細列表：過濾掉 isAuxiliary 項目 */}
+                            {(inv.consolidatedItems?.length>0) ? inv.consolidatedItems.filter(item => !item.isAuxiliary).map((item, i)=>{
+                                {/* 明細顏色判斷 (isChecked=1 時為 bg-gray-50) */}
+                                const bgColorClass = getStep5ItemBgClass(inv, item);
+                                const passTextColorClass = getPassTextColorClass(item);
+
+                                return (
+                                  <div key={i} className={`${bgColorClass} px-2 py-1 rounded text-xs flex justify-between items-center`}>
+                                    <span className={item.consolidatedIsPass ? "text-pass" : "text-gray-800"}>
+                                      {item.name}{item.count>1?`（${item.count}項）`:''}
+                                    </span>
+                                    <div className="flex items-center gap-2">
+                                        <span className={`font-semibold ${item.consolidatedIsPass ? "amount-pass" : "text-gray-900"}`}>{$$formatAmount(item.amount)}元</span>
+                                    </div>
+                                  </div>
+                                );
+                            }) : (
+                              <div className="text-gray-400 italic text-xs">無商品資料</div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="text-center">
+                  <button onClick={handleConfirmCompletion}
+                          className="bg-blue-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-600 transition-colors">
+                    確認完成
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {step===6 && (
+              <div className="text-center">
+                <h2 className="text-lg font-bold mb-3">審核完成</h2>
+                <p className="text-sm text-gray-600 mb-4">所有發票已完成審核處理，可以下載結果</p>
+
+                {newlyAddedRefData.length>0 && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-left">
+                    <h3 className="text-sm font-semibold mb-2">本次新增的參考資料：</h3>
+                    <div className="text-xs text-gray-700">共新增 {newlyAddedRefData.length} 筆，送出狀態：{
+                      n8nAddStatus==='ok' ? '成功' : n8nAddStatus==='fail' ? '失敗' : '處理中'
+                    }</div>
+                    {n8nAddStatus==='fail' && (
+                      <div className="mt-2">
+                        <button onClick={retrySendToN8n}
+                                className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600">重新傳送</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {info && <p className="text-xs text-gray-500 mb-3">{info}</p>}
+
+                <div className="flex flex-col items-center gap-3">
+                  <button onClick={downloadResults}
+                          className="w-full md:w-64 bg-green-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-green-600 transition-colors">
+                    下載處理結果
+                  </button>
+                  <button onClick={()=>setStep(5)}
+                          className="w-full md:w-64 bg-gray-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-gray-600 transition-colors">
+                    返回結果列表
+                  </button>
+                  <button onClick={()=>{
+                            setStep(1); setUploadedFile(null);
+                            setInvoiceData([]); setInvoiceDetailsData([]);
+                            setOriginalInvoiceData([]); setOriginalDetailsData([]);
+                            setPendingReviews([]); setCurrentReviewIndex(0);
+                            setError(''); setNewlyAddedRefData([]);
+                            setInfo(''); setN8nAddStatus(null); setN8nGetStatus(null); setRefData([]); setFixedRefData([]);
+                            setShowPassModal(false); setCurrentPassItem(null); setPassKeywordInput(''); setTempPassKeywords({});
+                            setUseSellerIdOnly(false); setEditUseSellerIdOnly(false); // 重設新狀態
+                          }}
+                          className="w-full md:w-64 bg-blue-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-600 transition-colors">
+                    處理新檔案
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {showEditModal && editingInvoice && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                <div className="bg-white rounded-lg p-4 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto"> {/* 調整 Modal 高度 */}
+                  <h3 className="text-sm font-bold mb-3">編輯發票審核結果</h3>
+
+                  <div className="grid grid-cols-2 gap-3 mb-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">發票號碼</label>
+                      <p className="text-sm font-semibold">{editingInvoice.invoiceNumber}</p>
+                    </div>
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                          <label className="block text-xs font-medium text-gray-700">賣方統一編號</label>
+                          {/* 【優化點 1】編輯畫面新增純統編判斷勾選框 */}
+                          <div className="flex items-center gap-2">
+                              <input type="checkbox" id="edit-use-seller-id-only" checked={editUseSellerIdOnly}
+                                     onChange={e=>setEditUseSellerIdOnly(e.target.checked)} className="w-3 h-3"/>
+                              <label htmlFor="edit-use-seller-id-only" className="text-xs text-gray-700">直接使用賣方統編判斷</label>
+                          </div>
+                      </div>
+                      {/* 編輯畫面中，統編底色一律顯示 (要求 7) */}
+                      <p className={`text-sm font-semibold ${getSellerIdBgClass(editingInvoice.sellerId, refData)}`}>
+                          {editingInvoice.sellerId}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mb-3">
+                    <label className="block text-xs font-medium text-gray-700 mb-1">賣方名稱</label>
+                    <p className="text-sm">{editingInvoice.sellerName}</p>
+                  </div>
+                  
+                  {/* 【修正 1】Step 5 編輯畫面顯示 U/V 欄資訊 (頂部區塊，非明細) */}
+                  {(editingInvoice.carrierNo2 || editingInvoice.totalNote) && (
+                      <div className="text-xs text-gray-600 mb-3 space-y-1 bg-gray-50 p-2 rounded border">
+                          {editingInvoice.carrierNo2 && (
+                              <p className="font-medium">載具號碼：{editingInvoice.carrierNo2}</p>
+                          )}
+                          {editingInvoice.totalNote && (
+                              <p className="font-medium">總備註：{editingInvoice.totalNote}</p>
+                          )}
+                      </div>
+                  )}
+
+                  <div className="mb-4">
+                    <label className="block text-xs font-medium text-gray-700 mb-2">商品明細</label>
+                    <div className="space-y-1 max-h-40 overflow-y-auto"> {/* 限制明細高度 */}
+                      {/* 明細列表：過濾掉 isAuxiliary 項目 */}
+                      {(editingInvoice.consolidatedItems||[]).filter(item => !item.isAuxiliary).map((item, i)=>{
+                        {/* 明細顏色完全依賴自身的 Item-level 規則 (要求 7) */}
+                        const isTempPassed = item.consolidatedIsPass || (
+                            tempPassKeywords[editingInvoice.invoiceNumber] &&
+                            tempPassKeywords[editingInvoice.invoiceNumber].some(rule => item.name.includes(rule.keyword))
+                        );
+
+                        const itemWithTempStatus = { ...item, consolidatedIsPass: isTempPassed };
+                        const bgColorClass = getEditModalItemBgClass(itemWithTempStatus);
+                        const passTextColorClass = getPassTextColorClass(itemWithTempStatus);
+                        
+                        return (
+                          <div key={i} className={`${bgColorClass} p-2 rounded text-xs flex justify-between items-center`}>
+                            <span className={itemWithTempStatus.consolidatedIsPass ? "text-pass" : "text-gray-800"}>
+                              {item.name}{item.count>1?`（${item.count}項）`:''}
+                            </span>
+                            <div className="flex items-center gap-2">
+                                <span className={`font-semibold ${itemWithTempStatus.consolidatedIsPass ? "amount-pass" : "text-gray-900"}`}>{$$formatAmount(item.amount)}元</span>
+                                {renderPassButton(item, editingInvoice)}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {(!editingInvoice.consolidatedItems || !editingInvoice.consolidatedItems.length) && (
+                        <p className="text-xs text-gray-500">無商品資料</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mb-4 flex-shrink-0">
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-xs font-medium text-gray-700">新增關鍵字（選填）</label>
+                      <div className="flex items-center gap-2">
+                        <input type="checkbox" id="edit-include-seller-id" checked={editIncludeSellerID}
+                               onChange={e=>setEditIncludeSellerID(e.target.checked)} className="w-3 h-3"/>
+                        <label htmlFor="edit-include-seller-id" className="text-xs text-gray-700">加入賣方統編判斷</label>
+                      </div>
+                    </div>
+                    <input type="text" value={newKeyword} onChange={e=>{setNewKeyword(e.target.value); setEditUseSellerIdOnly(false);}}
+                      placeholder="輸入新的可扣抵 / 不可扣抵商品關鍵字，多個請用逗號分隔"
+                      className="w-full p-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"/>
+                  </div>
+
+                  <div className="flex gap-3 flex-shrink-0">
+                    <button onClick={()=>handleEditDecision('deductible')}
+                            className="flex-1 bg-green-500 text-white px-3 py-2 text-xs rounded-lg hover:bg-green-600 transition-colors">
+                      可扣抵
+                    </button>
+                    <button onClick={()=>handleEditDecision('non-deductible')}
+                            className="flex-1 bg-red-500 text-white px-3 py-2 text-xs rounded-lg hover:bg-red-600 transition-colors">
+                      不可扣抵
+                    </button>
+                    <button onClick={closeEditModal}
+                            className="flex-1 bg-gray-500 text-white px-3 py-2 text-xs rounded-lg hover:bg-gray-600 transition-colors">
+                      取消
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* Pass 關鍵字設定模態框 */}
+            {showPassModal && currentPassItem && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 max-w-sm w-full mx-4 relative">
+                        <h3 className="text-lg font-bold mb-4">請輸入需略過的關鍵字</h3>
+                        
+                        {/* 右上角 X 關閉 */}
+                        <button onClick={() => setShowPassModal(false)} className="absolute top-3 right-3 text-gray-500 hover:text-gray-800">
+                            <Icon name="x" className="w-5 h-5"/>
+                        </button>
+
+                        {/* 原始明細名稱 */}
+                        <div className="mb-3 p-2 bg-gray-100 rounded">
+                            <label className="block text-xs font-medium text-gray-500">原始明細：</label>
+                            <p className="text-sm font-semibold">{currentPassItem.name}</p>
+                        </div>
+
+                        {/* 關鍵字輸入框 */}
+                        <div className="mb-4">
+                            <label htmlFor="pass-keyword-input" className="block text-sm font-medium text-gray-700 mb-1">略過關鍵字：</label>
+                            <input type="text" id="pass-keyword-input"
+                                value={passKeywordInput}
+                                onChange={e => setPassKeywordInput(e.target.value)}
+                                placeholder="輸入關鍵字，多個請用逗號分隔"
+                                className="w-full p-2 border border-gray-300 rounded-lg"/>
+                        </div>
+                        
+                        {/* 賣方統編選項 */}
+                        <div className="flex items-center gap-2 mb-4">
+                            <input type="checkbox" id="pass-include-seller-id" checked={currentPassItem.includeSellerID || false} 
+                                   onChange={e => setCurrentPassItem(p => ({...p, includeSellerID: e.target.checked}))} className="w-3 h-3"/>
+                            <label htmlFor="pass-include-seller-id" className="text-xs text-gray-700">加入賣方統編判斷</label>
+                        </div>
+
+
+                        <div className="flex justify-end gap-3">
+                            <button onClick={() => setShowPassModal(false)}
+                                    className="bg-gray-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-gray-600">
+                                取消
+                            </button>
+                            <button onClick={handleConfirmPassKeyword}
+                                    disabled={!passKeywordInput.trim()}
+                                    className="bg-blue-500 text-white px-4 py-2 text-sm rounded-lg hover:bg-blue-600 disabled:bg-blue-300">
+                                確認
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<InvoiceReviewApp />);
+  </script>
+</body>
+</html>
