@@ -84,6 +84,36 @@
       const n = Number(s || 0);
       return Number.isFinite(n) ? n : 0;
     };
+    const $$sanitizeFilenamePart = (value, fallback = '') => {
+      const sanitized = String(value ?? '')
+        .replace(/[\\/:*?"<>|]/g, '_')
+        .replace(/\s+/g, '');
+      return sanitized || fallback;
+    };
+    const $$parseEInvoiceFilename = (filename) => {
+      const stem = String(filename ?? '').replace(/\.xlsx$/i, '');
+      // einvoice_download：<統編>_<客戶名稱前4字>_進項_YYYYMMDD[_重複序號].xlsx
+      const exportedMatch = stem.match(/^(\d{8})_(.+)_進項_(\d{8})(?:_(\d+))?$/);
+      if (exportedMatch) {
+        return {
+          companyId: exportedMatch[1],
+          companyShortName: exportedMatch[2],
+          sourceDate: exportedMatch[3],
+        };
+      }
+
+      // 相容既有檔案：只要檔名仍以 8 位統編開頭即可讀取。
+      const legacyMatch = stem.match(/^(\d{8})(?:_|$)/);
+      return legacyMatch
+        ? { companyId: legacyMatch[1], companyShortName: '', sourceDate: '' }
+        : null;
+    };
+    const $$localDateStamp = (date = new Date()) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}${month}${day}`;
+    };
 
     function Icon({name, className="w-5 h-5"}) {
       const icons = {
@@ -179,6 +209,7 @@
       const apiKey = useApiKey();
       const [step, setStep] = useState(1);
       const [companyId, setCompanyId] = useState('');
+      const [companyShortName, setCompanyShortName] = useState('');
       const [uploadedFile, setUploadedFile] = useState(null);
 
       const [invoiceData, setInvoiceData] = useState([]);
@@ -285,13 +316,19 @@
       const handleFileUpload = async (event) => {
         const file = event.target.files?.[0];
         if (!file) return;
-        if (!file.name.endsWith('.xlsx')) {
+        if (!/\.xlsx$/i.test(file.name)) {
           setError('請上傳 Excel 檔案（.xlsx 格式）'); return;
+        }
+        const fileInfo = $$parseEInvoiceFilename(file.name);
+        if (!fileInfo) {
+          setError('無法從檔名辨識 8 位統編；請使用 einvoice_download 匯出的檔案');
+          return;
         }
         setError('');
         setUploadedFile(file);
-        const id = file.name.substring(0,8);
+        const id = fileInfo.companyId;
         setCompanyId(id);
+        setCompanyShortName('');
 
         try {
           ensureXLSXReady();
@@ -313,6 +350,13 @@
             setError('無法讀取工作表，請確認檔案包含 Invoice / btb411w_xls1 與 Invoice_details / btb411w_xls2');
             return;
           }
+          const workbookShortName = $$sanitizeFilenamePart(
+            invoiceSheetData.find(row => row.buyerName)?.buyerName,
+            '未命名'
+          ).slice(0, 4);
+          setCompanyShortName(
+            $$sanitizeFilenamePart(fileInfo.companyShortName, workbookShortName).slice(0, 4)
+          );
           setOriginalInvoiceData(invoiceSheetData);
           setOriginalDetailsData(detailsSheetData);
           setInvoiceData(invoiceSheetData);
@@ -344,6 +388,7 @@
               const processed = rows.map((row, idx) => ({
                 invoiceNumber: row[0] || '',
                 buyerNote:     row[1] || '',
+                buyerName:     row[6] || '',
                 sellerId:      String(row[7] || ''),
                 sellerName:    row[8] || '',
                 originalRow:   row,
@@ -1257,8 +1302,12 @@
           const ws2 = window.XLSX.utils.aoa_to_sheet([detailsHeaders, ...newDetailsRows]);
           window.XLSX.utils.book_append_sheet(wb, ws2, "Invoice_details");
 
-          const dateStr = new Date().toISOString().slice(0,10);
-          window.XLSX.writeFile(wb, `${companyId}_處理結果_${dateStr}.xlsx`);
+          const dateStr = $$localDateStamp();
+          const shortName = $$sanitizeFilenamePart(companyShortName, '未命名').slice(0, 4);
+          window.XLSX.writeFile(
+            wb,
+            `${companyId}_${shortName}_處理結果_進項_${dateStr}.xlsx`
+          );
         } catch (e) {
           alert('下載失敗：' + (e?.message || String(e)));
         }
@@ -1409,6 +1458,7 @@
                   <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-left">
                     <p className="text-xs text-green-800"><strong>已上傳：</strong>{uploadedFile.name}</p>
                     <p className="text-xs text-green-600"><strong>公司統編：</strong>{companyId}</p>
+                    <p className="text-xs text-green-600"><strong>客戶名稱：</strong>{companyShortName}</p>
                     <p className="text-xs text-green-600"><strong>發票筆數：</strong>{invoiceData.length}</p>
                     <p className="text-xs text-green-600"><strong>明細筆數：</strong>{invoiceDetailsData.length}</p>
                   </div>
@@ -1700,7 +1750,7 @@
                     返回結果列表
                   </button>
                   <button onClick={()=>{
-                            setStep(1); setUploadedFile(null);
+                            setStep(1); setUploadedFile(null); setCompanyId(''); setCompanyShortName('');
                             setInvoiceData([]); setInvoiceDetailsData([]);
                             setOriginalInvoiceData([]); setOriginalDetailsData([]);
                             setPendingReviews([]); setCurrentReviewIndex(0);
