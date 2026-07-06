@@ -9,6 +9,7 @@
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone@7.28.5/babel.min.js"></script>
+  <script src="./eudc-config.js"></script>
   <script>
     (function loadXLSX() {
       function add(src, onload) {
@@ -89,6 +90,14 @@
         .replace(/[\\/:*?"<>|]/g, '_')
         .replace(/\s+/g, '');
       return sanitized || fallback;
+    };
+    const $$applyEudcCharacterReplacements = (value) => {
+      const replacements = window.EUDC_CHARACTER_REPLACEMENTS || {};
+      return Object.entries(replacements).reduce(
+        (text, [source, replacement]) =>
+          source ? text.split(source).join(String(replacement)) : text,
+        String(value ?? '')
+      );
     };
     const $$parseEInvoiceFilename = (filename) => {
       const stem = String(filename ?? '').replace(/\.xlsx$/i, '');
@@ -1303,7 +1312,8 @@
           window.XLSX.utils.book_append_sheet(wb, ws2, "Invoice_details");
 
           const dateStr = $$localDateStamp();
-          const shortName = $$sanitizeFilenamePart(companyShortName, '未命名').slice(0, 4);
+          const eudcCompanyShortName = $$applyEudcCharacterReplacements(companyShortName);
+          const shortName = $$sanitizeFilenamePart(eudcCompanyShortName, '未命名').slice(0, 4);
           window.XLSX.writeFile(
             wb,
             `${companyId}_${shortName}_處理結果_進項_${dateStr}.xlsx`
