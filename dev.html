@@ -137,11 +137,31 @@
       return icons[name] ?? null;
     }
 
+        const N8N_PROXY_BASE = 'https://api.lintrax.org';
+    const API_KEY_SESSION_STORAGE = 'sunjaeTools.apiKey';
+
     function useApiKey() {
       const [apiKey, setApiKey] = useState('');
       useEffect(() => {
         const params = new URLSearchParams(window.location.search);
-        setApiKey(params.get('key') || '');
+        const keyFromUrl = params.get('key') || '';
+        let storedKey = '';
+        try {
+          storedKey = window.sessionStorage.getItem(API_KEY_SESSION_STORAGE) || '';
+        } catch {}
+
+        const key = keyFromUrl || storedKey;
+        setApiKey(key);
+
+        if (keyFromUrl) {
+          try {
+            window.sessionStorage.setItem(API_KEY_SESSION_STORAGE, keyFromUrl);
+          } catch {}
+          params.delete('key');
+          const query = params.toString();
+          const cleanUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`;
+          window.history.replaceState(null, '', cleanUrl);
+        }
       }, []);
       return apiKey;
     }
@@ -171,10 +191,10 @@
     }
 
     async function fetchRefDataFromN8n({ apiKey, customerId }) {
-      const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/get-ref-data';
+      const endpoint = `${N8N_PROXY_BASE}/n8n/get-ref-data`;
       const headers = { 'X-API-Key': apiKey };
       try {
-        const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
+        const res = await fetch(endpoint, {
           method: 'POST',
           headers: { ...headers, 'Content-Type': 'application/json' },
           body: JSON.stringify({ customerId }),
@@ -182,29 +202,31 @@
         const data = await res.json().catch(()=>null);
         const normalized = normalizeRefData(data, customerId);
         if (normalized) return normalized;
-      } catch(e){
-        setInfo('');
+      } catch (error) {
+        console.warn('POST get-ref-data failed; trying GET fallback.', error);
       }
       try {
-        const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}&customerId=${encodeURIComponent(customerId)}`, {
+        const url = new URL(endpoint);
+        url.searchParams.set('customerId', customerId);
+        const res = await fetch(url, {
           method: 'GET',
           headers,
         });
         const data = await res.json().catch(()=>null);
         const normalized = normalizeRefData(data, customerId);
         if (normalized) return normalized;
-      } catch(e){
-        setInfo('');
+      } catch (error) {
+        console.warn('GET get-ref-data failed.', error);
       }
       return null;
     }
 
     // keepalive: true
     async function addRefRuleToN8n({ apiKey, customerId, rules }) {
-      const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/add-ref-data';
+      const endpoint = `${N8N_PROXY_BASE}/n8n/add-ref-data`;
       const headers = { 'X-API-Key': apiKey, 'Content-Type': 'application/json' };
       const payload = { customerId, rules };
-      const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),
