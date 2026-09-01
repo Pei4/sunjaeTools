@@ -9,6 +9,7 @@
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone@7.28.5/babel.min.js"></script>
+  <script src="./eudc-config.js"></script>
   <script>
     (function loadXLSX() {
       function add(src, onload) {
@@ -90,6 +91,14 @@
         .replace(/\s+/g, '');
       return sanitized || fallback;
     };
+    const $$applyEudcCharacterReplacements = (value) => {
+      const replacements = window.EUDC_CHARACTER_REPLACEMENTS || {};
+      return Object.entries(replacements).reduce(
+        (text, [source, replacement]) =>
+          source ? text.split(source).join(String(replacement)) : text,
+        String(value ?? '')
+      );
+    };
     const $$parseEInvoiceFilename = (filename) => {
       const stem = String(filename ?? '').replace(/\.xlsx$/i, '');
       // einvoice_download：<統編>_<客戶名稱前4字>_進項_YYYYMMDD[_重複序號].xlsx
@@ -128,11 +137,31 @@
       return icons[name] ?? null;
     }
 
+    const N8N_PROXY_BASE = 'https://api.lintrax.org';
+    const API_KEY_SESSION_STORAGE = 'sunjaeTools.apiKey';
+
     function useApiKey() {
       const [apiKey, setApiKey] = useState('');
       useEffect(() => {
         const params = new URLSearchParams(window.location.search);
-        setApiKey(params.get('key') || '');
+        const keyFromUrl = params.get('key') || '';
+        let storedKey = '';
+        try {
+          storedKey = window.sessionStorage.getItem(API_KEY_SESSION_STORAGE) || '';
+        } catch {}
+
+        const key = keyFromUrl || storedKey;
+        setApiKey(key);
+
+        if (keyFromUrl) {
+          try {
+            window.sessionStorage.setItem(API_KEY_SESSION_STORAGE, keyFromUrl);
+          } catch {}
+          params.delete('key');
+          const query = params.toString();
+          const cleanUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`;
+          window.history.replaceState(null, '', cleanUrl);
+        }
       }, []);
       return apiKey;
     }
@@ -162,40 +191,26 @@
     }
 
     async function fetchRefDataFromN8n({ apiKey, customerId }) {
-      const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/get-ref-data';
-      const headers = { 'X-API-Key': apiKey };
-      try {
-        const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
-          method: 'POST',
-          headers: { ...headers, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ customerId }),
-        });
-        const data = await res.json().catch(()=>null);
-        const normalized = normalizeRefData(data, customerId);
-        if (normalized) return normalized;
-      } catch(e){
-        setInfo('');
-      }
-      try {
-        const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}&customerId=${encodeURIComponent(customerId)}`, {
-          method: 'GET',
-          headers,
-        });
-        const data = await res.json().catch(()=>null);
-        const normalized = normalizeRefData(data, customerId);
-        if (normalized) return normalized;
-      } catch(e){
-        setInfo('');
-      }
-      return null;
+      const endpoint = `${N8N_PROXY_BASE}/n8n/get-ref-data`;
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'X-API-Key': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ customerId }),
+      });
+      if (!res.ok) throw new Error(`n8n 回應非 2xx（HTTP ${res.status}）`);
+      const data = await res.json().catch(() => null);
+      return normalizeRefData(data, customerId);
     }
 
     // keepalive: true
     async function addRefRuleToN8n({ apiKey, customerId, rules }) {
-      const endpoint = 'https://n8n-cors-proxy.zeabur.app/n8n/add-ref-data';
+      const endpoint = `${N8N_PROXY_BASE}/n8n/add-ref-data`;
       const headers = { 'X-API-Key': apiKey, 'Content-Type': 'application/json' };
       const payload = { customerId, rules };
-      const res = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),
@@ -1303,7 +1318,8 @@
           window.XLSX.utils.book_append_sheet(wb, ws2, "Invoice_details");
 
           const dateStr = $$localDateStamp();
-          const shortName = $$sanitizeFilenamePart(companyShortName, '未命名').slice(0, 4);
+          const eudcCompanyShortName = $$applyEudcCharacterReplacements(companyShortName);
+          const shortName = $$sanitizeFilenamePart(eudcCompanyShortName, '未命名').slice(0, 4);
           window.XLSX.writeFile(
             wb,
             `${companyId}_${shortName}_處理結果_進項_${dateStr}.xlsx`
