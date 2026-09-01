@@ -137,7 +137,7 @@
       return icons[name] ?? null;
     }
 
-        const N8N_PROXY_BASE = 'https://api.lintrax.org';
+    const N8N_PROXY_BASE = 'https://api.lintrax.org';
     const API_KEY_SESSION_STORAGE = 'sunjaeTools.apiKey';
 
     function useApiKey() {
@@ -192,33 +192,17 @@
 
     async function fetchRefDataFromN8n({ apiKey, customerId }) {
       const endpoint = `${N8N_PROXY_BASE}/n8n/get-ref-data`;
-      const headers = { 'X-API-Key': apiKey };
-      try {
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { ...headers, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ customerId }),
-        });
-        const data = await res.json().catch(()=>null);
-        const normalized = normalizeRefData(data, customerId);
-        if (normalized) return normalized;
-      } catch (error) {
-        console.warn('POST get-ref-data failed; trying GET fallback.', error);
-      }
-      try {
-        const url = new URL(endpoint);
-        url.searchParams.set('customerId', customerId);
-        const res = await fetch(url, {
-          method: 'GET',
-          headers,
-        });
-        const data = await res.json().catch(()=>null);
-        const normalized = normalizeRefData(data, customerId);
-        if (normalized) return normalized;
-      } catch (error) {
-        console.warn('GET get-ref-data failed.', error);
-      }
-      return null;
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'X-API-Key': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ customerId }),
+      });
+      if (!res.ok) throw new Error(`n8n 回應非 2xx（HTTP ${res.status}）`);
+      const data = await res.json().catch(() => null);
+      return normalizeRefData(data, customerId);
     }
 
     // keepalive: true
